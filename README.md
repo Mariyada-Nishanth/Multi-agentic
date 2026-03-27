@@ -18,9 +18,23 @@ GitHub Issue -> github-watcher.js -> OpenClaw Gateway (localhost:18789) -> Groq 
 
 1. Clone this project.
 2. Copy `config/github-watch.example.json` to `config/github-watch.json`.
-3. Fill in your GitHub repo and token values.
-4. Run `node start-agents.js`.
-5. Open `dashboard/index.html` in a browser.
+3. Copy `config/travel-watch.example.json` to `config/travel-watch.json`.
+4. Fill in your GitHub and travel API key values.
+5. Run `node start-agents.js`.
+6. Open `dashboard/index.html` in a browser.
+
+## Travel Concierge Flow
+
+The new travel agent runs continuously and follows this machine pipeline:
+
+Dashboard Prompt -> ORACLE (intent parse) -> SENTINEL (flight scan) + WEATHER (forecast) + GUARDIAN (budget/safety) + OPTIMIZER (best value) -> Agent Negotiation Round -> Complete itinerary auto-booked (simulated) + shared in dashboard response.
+
+Integrations in this flow:
+
+- aviationstack API for live flight data.
+- OpenWeather API for forecast and risk estimation.
+
+Auto-booking in v1 is intentionally simulated (no payment booking provider yet).
 
 ## How To Add A New Agent
 

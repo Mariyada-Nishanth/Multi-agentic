@@ -30,6 +30,14 @@ function writeLogsData(data) {
   fs.writeFileSync(LOGS_FILE, JSON.stringify(data, null, 2));
 }
 
+function sanitizeDashboardLog(message) {
+  return String(message || '')
+    .replace(/\x1B\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
 function detectLevel(message) {
   const lower = message.toLowerCase();
   if (message.includes('error') || message.includes('ERROR') || lower.includes('error')) {
@@ -62,7 +70,7 @@ function upsertAgentStatus(agentName, status, nowIso) {
 }
 
 function appendLog(agentName, message) {
-  const trimmed = message.trim();
+  const trimmed = sanitizeDashboardLog(message).trim();
   if (!trimmed) return;
 
   const now = new Date().toISOString();
@@ -143,7 +151,7 @@ function startAgent(name, command, args, options) {
 }
 
 ensureLogsFile();
-console.log('🦞 Starting Autonomous Agent System...\n');
+console.log('Starting Autonomous Agent System...\n');
 
 const watcher = startAgent(
   'github-watcher',
@@ -151,7 +159,15 @@ const watcher = startAgent(
   ['agents/github/github-watcher.js'],
   { cwd: __dirname }
 );
-console.log('✅ GitHub Watcher started (Observe layer)');
+console.log('GitHub Watcher started (Observe layer)');
+
+const travelConcierge = startAgent(
+  'travel-concierge',
+  'node',
+  ['agents/travel/travel-concierge.js'],
+  { cwd: __dirname }
+);
+console.log('Travel Concierge started (Plan layer)');
 
 const gateway = startAgent(
   'orchestrator',
@@ -159,13 +175,14 @@ const gateway = startAgent(
   ['gateway', 'run'],
   { cwd: __dirname, shell: true }
 );
-console.log('✅ Orchestrator started (Decide layer)');
+console.log('Orchestrator started (Decide layer)');
 
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down all agents...');
+  console.log('\nShutting down all agents...');
   watcher.kill();
+  travelConcierge.kill();
   gateway.kill();
   process.exit();
 });
 
-console.log('\n🚀 All agents running! Press Ctrl+C to stop everything.\n');
+console.log('\nAll agents running. Press Ctrl+C to stop everything.\n');

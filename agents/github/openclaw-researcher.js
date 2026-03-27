@@ -1,4 +1,4 @@
-const https = require('https');
+const http = require('http');
 
 const OPENCLAW_WS_TOKEN = '201ab2e994d0ded9a07c32d90b2364b57a67ef4d840f81d0';
 const OPENCLAW_BASE = '127.0.0.1';
@@ -23,7 +23,7 @@ function askOpenClaw(prompt) {
         'Content-Length': Buffer.byteLength(body)
       }
     };
-    const req = https.request(options, (res) => {
+    const req = http.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -66,11 +66,11 @@ function postGitHubComment(owner, repo, issueNumber, body) {
   });
 }
 
-async function researchAndComment(issue) {
+async function researchAndComment(issue, owner, repo) {
   console.log(`  [OpenClaw] Sending issue #${issue.number} to gateway...`);
 
   const prompt = `
-NEW BUG REPORTED on vamshi2196/WAFFLE:
+NEW BUG REPORTED on ${owner}/${repo}:
 Issue #${issue.number}: ${issue.title}
 Description: ${issue.body || 'No description'}
 
@@ -79,7 +79,7 @@ Reply ONLY with this JSON (no extra text):
 {
   "action": "comment",
   "issue_number": ${issue.number},
-  "repo": "vamshi2196/WAFFLE",
+  "repo": "${owner}/${repo}",
   "comment": "your full markdown analysis here"
 }
 `.trim();
@@ -95,8 +95,8 @@ Reply ONLY with this JSON (no extra text):
     if (jsonMatch) {
       const action = JSON.parse(jsonMatch[0]);
       if (action.action === 'comment' && action.comment) {
-        const fullComment = `## ðŸ¤– OpenClaw Research Agent\n\n${action.comment}\n\n---\n*Analyzed through OpenClaw gateway with full context + memory ðŸ¦ž*`;
-        await postGitHubComment('vamshi2196', 'WAFFLE', issue.number, fullComment);
+        const fullComment = `## OpenClaw Research Agent\n\n${action.comment}\n\n---\nAnalyzed through OpenClaw gateway with full context and memory.`;
+        await postGitHubComment(owner, repo, issue.number, fullComment);
         console.log(`  [OpenClaw] Research comment posted to issue #${issue.number}`);
       }
     } else {
@@ -108,4 +108,4 @@ Reply ONLY with this JSON (no extra text):
   }
 }
 
-module.exports = { researchAndComment };
+module.exports = { researchAndComment, askOpenClaw };

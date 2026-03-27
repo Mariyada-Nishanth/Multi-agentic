@@ -1,0 +1,33 @@
+{
+  "aviationstack_api_key": "YOUR_AVIATIONSTACK_API_KEY_HERE",
+  "openweather_api_key": "YOUR_OPENWEATHER_API_KEY_HERE",
+  "prompt_api_port": 18890,
+  "poll_interval_ms": 4000,
+  "flight_result_limit": 8,
+  "assumed_base_fare_inr": 7000,
+  "default_hotel_estimate_inr": 12000,
+  "default_nights": 4,
+  "price_volatility_factor": 1,
+  "optimizer_weights": {
+    "fare": 0.6,
+    "status": 0.2,
+    "time": 0.2
+  },
+  "defaults": {
+    "origin_iata": "BLR",
+    "default_destination": "goa",
+    "default_budget_inr": 35000,
+    "default_group_size": 2,
+    "default_preferences": [
+      "budget",
+      "beach"
+    ],
+    "city_iata_map": {
+      "goa": "GOI",
+      "mumbai": "BOM",
+      "delhi": "DEL",
+      "hyderabad": "HYD",
+      "bangalore": "BLR"
+    }
+  }
+}

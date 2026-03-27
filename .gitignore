@@ -1,4 +1,8 @@
 node_modules/
 config/github-watch.json
+config/travel-watch.json
 dashboard/logs.json
+dashboard/travel-response.json
 .env
+travel-state.json
+watcher-state.json

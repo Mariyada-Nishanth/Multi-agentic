@@ -1,6 +1,7 @@
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
+const { researchAndComment, askOpenClaw } = require('./openclaw-researcher');
 
 const config = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../../config/github-watch.json'), 'utf8')
@@ -9,9 +10,13 @@ const STATE_FILE = './watcher-state.json';
 
 function loadState() {
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (!Array.isArray(parsed.seenIssues)) parsed.seenIssues = [];
+    if (!Array.isArray(parsed.seenPRs)) parsed.seenPRs = [];
+    if (!Array.isArray(parsed.seenCommits)) parsed.seenCommits = [];
+    return parsed;
   } catch {
-    return { seenIssues: [], seenPRs: [] };
+    return { seenIssues: [], seenPRs: [], seenCommits: [] };
   }
 }
 
@@ -36,6 +41,76 @@ function githubRequest(path) {
       res.on('end', () => resolve(JSON.parse(data)));
     }).on('error', reject);
   });
+}
+
+function postCommitComment(owner, repo, sha, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({ body });
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${owner}/${repo}/commits/${sha}/comments`,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.github_token}`,
+        'User-Agent': 'openclaw-watcher',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    };
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => resolve(JSON.parse(body)));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+async function analyzeCommitWithOpenClaw(owner, repoName, commit) {
+  const sha = commit.sha;
+  const details = await githubRequest(`/repos/${owner}/${repoName}/commits/${sha}`);
+  const files = Array.isArray(details.files) ? details.files : [];
+  const maxFiles = Number(config.commit_review_max_files || 5);
+  const maxPatchChars = Number(config.commit_review_max_patch_chars || 2000);
+
+  const patchSummary = files.slice(0, maxFiles).map((file) => {
+    const patch = (file.patch || '').slice(0, maxPatchChars);
+    return `File: ${file.filename}\nStatus: ${file.status}\nPatch:\n${patch || '[no patch data]'}\n`;
+  }).join('\n');
+
+  const prompt = `
+COMMIT REVIEW for ${owner}/${repoName}
+SHA: ${sha}
+Message: ${details.commit && details.commit.message}
+Author: ${details.commit && details.commit.author && details.commit.author.name}
+
+Diff summary:\n${patchSummary}
+
+Analyze this commit for potential bugs, risks, or missing tests. Provide fixes or suggestions.
+Reply ONLY with JSON:
+{
+  "summary": "short summary",
+  "risks": ["risk1", "risk2"],
+  "suggested_fixes": ["fix1", "fix2"]
+}
+`.trim();
+
+  const response = await askOpenClaw(prompt);
+  const text = response.text || response.message || JSON.stringify(response);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+  if (!jsonMatch) {
+    return {
+      summary: 'Unable to parse OpenClaw response.',
+      risks: [],
+      suggested_fixes: []
+    };
+  }
+
+  return JSON.parse(jsonMatch[0]);
 }
 
 function postComment(owner, repo, number, body) {
@@ -119,18 +194,22 @@ async function checkRepo(repo) {
 
     try {
       await addLabel(owner, repoName, issue.number, [label]);
-      console.log(`  Ã¢â€ â€™ Labeled: ${label}`);
+      console.log(`  Labeled: ${label}`);
     } catch (e) {
-      console.log(`  Ã¢â€ â€™ Could not add label (create it on GitHub first): ${label}`);
+      console.log(`  Could not add label (create it on GitHub first): ${label}`);
     }
 
     const comment = urgent
-      ? `Ã°Å¸Å¡Â¨ This looks like a **bug** Ã¢â‚¬â€ flagging as urgent!\n\nWe'll look into it ASAP.\n\n*Posted by OpenClaw Watcher Ã°Å¸Â¦Å¾*`
-      : `Ã°Å¸â€˜â€¹ Thanks for opening this! Labeled as **${label}**. We'll review it soon.\n\n*Posted by OpenClaw Watcher Ã°Å¸Â¦Å¾*`;
+      ? `This looks like a **bug** - flagging as urgent.\n\nWe will look into it as soon as possible.\n\nPosted by OpenClaw Watcher.`
+      : `Thanks for opening this. Labeled as **${label}**. We will review it soon.\n\nPosted by OpenClaw Watcher.`;
 
     await postComment(owner, repoName, issue.number, comment);
-    console.log(`  Ã¢â€ â€™ Comment posted`);
-    if (urgent) console.log(`  Ã¢Å¡Â Ã¯Â¸Â  URGENT BUG: #${issue.number} - ${issue.title}`);
+    console.log(`  Comment posted`);
+    if (urgent) console.log(`  URGENT BUG: #${issue.number} - ${issue.title}`);
+
+    if (urgent && config.issue_research_enabled) {
+      await researchAndComment(issue, owner, repoName);
+    }
 
     state.seenIssues.push(issue.number);
     saveState(state);
@@ -145,15 +224,41 @@ async function checkRepo(repo) {
 
     console.log(`  NEW PR #${pr.number}: ${pr.title}`);
     await postComment(owner, repoName, pr.number,
-      `Ã°Å¸â€˜â‚¬ New PR: **${pr.title}**\nReview requested!\n\n*Posted by OpenClaw Watcher Ã°Å¸Â¦Å¾*`
+      `New PR: **${pr.title}**\nReview requested.\n\nPosted by OpenClaw Watcher.`
     );
-    console.log(`  Ã¢â€ â€™ PR comment posted`);
+    console.log(`  PR comment posted`);
 
     state.seenPRs.push(pr.number);
     saveState(state);
   }
 
-  console.log(`  Ã¢Å“â€œ Done`);
+  if (config.commit_review_enabled) {
+    const commits = await githubRequest(
+      `/repos/${owner}/${repoName}/commits?per_page=${Number(config.commit_review_per_page || 5)}`
+    );
+
+    for (const commit of commits) {
+      if (state.seenCommits.includes(commit.sha)) continue;
+      console.log(`  NEW COMMIT ${commit.sha.slice(0, 7)}: ${commit.commit && commit.commit.message}`);
+
+      try {
+        const review = await analyzeCommitWithOpenClaw(owner, repoName, commit);
+        const body = `## OpenClaw Commit Review\n\n**Summary**\n${review.summary || 'N/A'}\n\n**Risks**\n${(review.risks || []).map((r) => `- ${r}`).join('\n') || '- none'}\n\n**Suggested fixes**\n${(review.suggested_fixes || []).map((f) => `- ${f}`).join('\n') || '- none'}\n\n---\nAutomated review via OpenClaw gateway.`;
+        await postCommitComment(owner, repoName, commit.sha, body);
+        console.log(`  Commit review posted for ${commit.sha.slice(0, 7)}`);
+      } catch (err) {
+        console.log(`  Commit review failed: ${err.message}`);
+      }
+
+      state.seenCommits.push(commit.sha);
+      if (state.seenCommits.length > 200) {
+        state.seenCommits = state.seenCommits.slice(-200);
+      }
+      saveState(state);
+    }
+  }
+
+  console.log(`  Done`);
 }
 
 async function run() {
@@ -168,4 +273,4 @@ async function run() {
 
 run();
 setInterval(run, 5 * 60 * 1000);
-console.log('Ã°Å¸Â¦Å¾ GitHub Watcher started Ã¢â‚¬â€ checking every 5 minutes');
+console.log('GitHub Watcher started - checking every 5 minutes');

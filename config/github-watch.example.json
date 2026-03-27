@@ -9,5 +9,10 @@
       }
     }
   ],
+  "issue_research_enabled": true,
+  "commit_review_enabled": true,
+  "commit_review_per_page": 5,
+  "commit_review_max_files": 5,
+  "commit_review_max_patch_chars": 2000,
   "github_token": "YOUR_GITHUB_TOKEN_HERE"
 }

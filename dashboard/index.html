@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenClaw Ops Dashboard</title>
+  <title>OpenClaw Central Ops</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg: #0a0c0f;
-      --bg-soft: #12171f;
       --panel: #11161e;
       --line: #1e2632;
       --text: #d8e1ee;
@@ -23,9 +22,7 @@
       --info: #2a3444;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     html, body {
       height: 100%;
@@ -50,13 +47,14 @@
       pointer-events: none;
       mix-blend-mode: soft-light;
       opacity: 0.35;
-      z-index: 50;
+      z-index: 30;
     }
 
     .shell {
       height: 100%;
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto auto auto 1fr;
+      min-height: 0;
     }
 
     .topbar {
@@ -72,7 +70,7 @@
     .title-wrap {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       min-width: 0;
     }
 
@@ -120,16 +118,56 @@
 
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 rgba(46, 204, 138, 0.7); }
-      70% { box-shadow: 0 0 0 9px rgba(46, 204, 138, 0); }
+      70% { box-shadow: 0 0 0 10px rgba(46, 204, 138, 0); }
       100% { box-shadow: 0 0 0 0 rgba(46, 204, 138, 0); }
+    }
+
+    .quickbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11, 15, 21, 0.95);
+      align-items: center;
+    }
+
+    .search {
+      background: rgba(18, 24, 34, 0.95);
+      border: 1px solid #2a3546;
+      border-radius: 8px;
+      color: #dce7f7;
+      font: inherit;
+      font-size: 12px;
+      padding: 9px 10px;
+      outline: none;
+    }
+
+    .btn {
+      border: 1px solid #2d3b50;
+      background: rgba(23, 30, 42, 0.9);
+      color: #dce7f7;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 12px;
+      padding: 9px 12px;
+      cursor: pointer;
+    }
+
+    .btn:hover { border-color: #46658a; }
+    .btn.primary {
+      border-color: #7d3518;
+      background: rgba(224, 90, 30, 0.2);
+      color: #ffe6d9;
     }
 
     .filterbar {
       display: flex;
+      align-items: center;
       gap: 8px;
       padding: 10px 20px;
       border-bottom: 1px solid var(--line);
-      background: rgba(12, 16, 22, 0.95);
+      background: rgba(10, 14, 20, 0.98);
       overflow-x: auto;
     }
 
@@ -140,14 +178,8 @@
       border-radius: 999px;
       padding: 6px 12px;
       font: inherit;
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
-      transition: all 140ms ease;
-    }
-
-    .filter-btn:hover {
-      border-color: #456487;
-      color: #d8e1ee;
     }
 
     .filter-btn.active {
@@ -157,20 +189,20 @@
     }
 
     .layout {
-      height: 100%;
       display: grid;
-      grid-template-columns: minmax(220px, 260px) 1fr minmax(220px, 280px);
+      grid-template-columns: minmax(260px, 300px) 1fr minmax(320px, 370px);
       gap: 12px;
       padding: 12px;
       min-height: 0;
+      overflow: hidden;
     }
 
     .panel {
       background: linear-gradient(180deg, rgba(18, 23, 31, 0.96), rgba(12, 16, 22, 0.96));
       border: 1px solid var(--line);
       border-radius: 10px;
-      overflow: hidden;
       min-height: 0;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -186,11 +218,52 @@
       background: rgba(7, 10, 14, 0.6);
     }
 
-    .agent-list {
+    .left-stack,
+    .right-stack {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .kpi {
+      border: 1px solid #273244;
+      border-radius: 8px;
+      background: rgba(19, 25, 35, 0.72);
+      padding: 8px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .kpi .label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .kpi .value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f0f5ff;
+    }
+
+    .agent-list,
+    .log-feed,
+    .right-scroll {
       padding: 10px;
       overflow: auto;
+      min-height: 0;
       display: grid;
       gap: 8px;
+      align-content: start;
     }
 
     .agent-card {
@@ -199,13 +272,19 @@
       border-radius: 8px;
       padding: 10px;
       display: grid;
-      gap: 5px;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .agent-card.active {
+      border-color: #7d3518;
+      box-shadow: 0 0 0 1px rgba(224, 90, 30, 0.25) inset;
     }
 
     .agent-head {
       display: flex;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       gap: 8px;
       font-size: 12px;
     }
@@ -227,30 +306,10 @@
       color: var(--muted);
     }
 
-    .log-feed {
-      overflow: auto;
-      min-height: 0;
-      padding: 8px;
-      display: grid;
-      gap: 8px;
-      align-content: start;
-    }
-
-    .empty {
-      color: var(--muted);
-      border: 1px dashed #2a3546;
-      border-radius: 8px;
-      padding: 16px;
-      text-align: center;
-      margin: 10px;
-    }
-
     .log-row {
       border-left: 4px solid var(--info);
       border-radius: 8px;
-      border-top: 1px solid #222c39;
-      border-right: 1px solid #222c39;
-      border-bottom: 1px solid #222c39;
+      border: 1px solid #222c39;
       padding: 10px;
       background: rgba(19, 25, 35, 0.88);
       display: grid;
@@ -267,7 +326,6 @@
       border-left-color: var(--error);
       background: rgba(224, 82, 82, 0.08);
     }
-
     .log-row.level-warn { border-left-color: var(--warn); }
     .log-row.level-success { border-left-color: var(--success); }
     .log-row.level-info { border-left-color: var(--info); }
@@ -311,40 +369,179 @@
       color: #dce7f7;
     }
 
-    .stats {
+    .module {
+      border: 1px solid #273244;
+      border-radius: 8px;
+      background: rgba(19, 25, 35, 0.75);
       padding: 10px;
-      overflow: auto;
       display: grid;
       gap: 8px;
     }
 
-    .stat {
-      border: 1px solid #273244;
-      border-radius: 8px;
-      padding: 10px;
-      background: rgba(19, 25, 35, 0.75);
-      display: grid;
-      gap: 5px;
-    }
-
-    .stat-label {
+    .module h4 {
+      margin: 0;
       font-size: 11px;
-      color: var(--muted);
+      color: #dbe9fb;
       text-transform: uppercase;
       letter-spacing: 0.4px;
     }
 
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #f0f5ff;
+    .inline {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
     }
 
-    @media (max-width: 980px) {
+    .input,
+    .select,
+    .textarea {
+      width: 100%;
+      background: rgba(18, 24, 34, 0.95);
+      border: 1px solid #2a3546;
+      border-radius: 8px;
+      color: #dce7f7;
+      font: inherit;
+      font-size: 12px;
+      padding: 9px 10px;
+      outline: none;
+    }
+
+    .textarea {
+      min-height: 72px;
+      resize: vertical;
+      line-height: 1.4;
+    }
+
+    .muted { color: var(--muted); font-size: 11px; }
+
+    .output-view {
+      border: 1px solid #2a3546;
+      border-radius: 8px;
+      background: rgba(14, 20, 29, 0.88);
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      max-height: 420px;
+      overflow: auto;
+    }
+
+    .output-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f1f6ff;
+      margin: 0;
+    }
+
+    .output-section {
+      display: grid;
+      gap: 6px;
+      border-top: 1px dashed #263145;
+      padding-top: 8px;
+    }
+
+    .output-section h5 {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: 0.35px;
+      text-transform: uppercase;
+      color: #f7cdb6;
+    }
+
+    .output-row {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #dce7f7;
+    }
+
+    .output-key {
+      font-weight: 700;
+      color: #eef5ff;
+    }
+
+    .output-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 3px;
+      color: #dce7f7;
+      font-size: 12px;
+    }
+
+    .pulse-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+    }
+
+    .pulse-item {
+      border: 1px solid #263245;
+      border-radius: 7px;
+      padding: 7px;
+      background: rgba(16, 23, 33, 0.84);
+      display: grid;
+      gap: 4px;
+    }
+
+    .pulse-meta {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .pulse-tag {
+      border-radius: 999px;
+      padding: 1px 7px;
+      border: 1px solid #33425a;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #d0e1f6;
+    }
+
+    .pulse-tag.issue { border-color: #4b5f83; color: #bdd5ff; }
+    .pulse-tag.pr { border-color: #2f6e58; color: #c2ffe8; }
+    .pulse-tag.commit { border-color: #73502b; color: #ffddb5; }
+    .pulse-tag.alert { border-color: #7b3e3e; color: #ffd0d0; }
+
+    .pulse-text {
+      font-size: 12px;
+      line-height: 1.35;
+      color: #dce7f7;
+      word-break: break-word;
+    }
+
+    .empty {
+      color: var(--muted);
+      border: 1px dashed #2a3546;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      margin: 10px;
+    }
+
+    @media (max-width: 1280px) {
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: auto minmax(320px, 1fr) auto;
+        overflow: auto;
       }
+
+      .left-stack,
+      .right-stack {
+        grid-template-rows: auto;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .quickbar {
+        grid-template-columns: 1fr;
+      }
+
       .topbar {
         flex-direction: column;
         align-items: flex-start;
@@ -356,8 +553,8 @@
   <div class="shell">
     <header class="topbar">
       <div class="title-wrap">
-        <div class="title">🦞 OpenClaw</div>
-        <div class="repo-badge">vamshi2196/WAFFLE</div>
+        <div class="title">🦞 OpenClaw Central Ops</div>
+        <div class="repo-badge">Mariyada-Nishanth/Multi-agentic</div>
       </div>
       <div class="meta">
         <div class="live"><span class="live-dot"></span>LIVE</div>
@@ -365,38 +562,103 @@
       </div>
     </header>
 
-    <div class="filterbar" id="filters"></div>
+    <section class="quickbar">
+      <input id="searchInput" class="search" type="text" placeholder="Search logs by text or keyword..." />
+      <button id="refreshNowBtn" class="btn">Refresh Now</button>
+      <button id="autoRefreshBtn" class="btn primary">Auto Refresh: ON</button>
+    </section>
+
+    <section class="filterbar" id="filters"></section>
 
     <main class="layout">
-      <section class="panel">
-        <h3>Agents</h3>
-        <div class="agent-list" id="agentList"></div>
-      </section>
+      <div class="left-stack">
+        <section class="panel">
+          <h3>Live Metrics</h3>
+          <div class="kpi-grid" id="kpiGrid"></div>
+        </section>
+
+        <section class="panel">
+          <h3>Agent Registry</h3>
+          <div class="agent-list" id="agentList"></div>
+        </section>
+      </div>
 
       <section class="panel">
-        <h3>Live Logs</h3>
+        <h3>Central Activity Feed</h3>
         <div class="log-feed" id="logFeed"></div>
       </section>
 
-      <section class="panel">
-        <h3>Stats</h3>
-        <div class="stats" id="stats"></div>
-      </section>
+      <div class="right-stack">
+        <section class="panel">
+          <h3>Command Center</h3>
+          <div class="right-scroll">
+            <div class="module">
+              <h4>Run Agent Prompt</h4>
+              <select id="targetAgent" class="select"></select>
+              <textarea id="promptInput" class="textarea" placeholder="Plan Goa trip next month for 3 under 45000 budget beach"></textarea>
+              <div class="inline">
+                <span id="commandStatus" class="muted">Ready. Select target agent and run.</span>
+                <button id="runPromptBtn" class="btn primary">Dispatch</button>
+              </div>
+            </div>
+
+            <div class="module">
+              <h4>Integration Health</h4>
+              <div class="inline">
+                <span id="healthStatus" class="muted">Not checked yet.</span>
+                <button id="checkHealthBtn" class="btn">Check</button>
+              </div>
+            </div>
+
+            <div class="module">
+              <h4>GitHub Pulse</h4>
+              <ul id="githubPulse" class="pulse-list">
+                <li class="muted">Waiting for github-watcher logs...</li>
+              </ul>
+            </div>
+
+            <div class="module">
+              <h4>Last Command Output</h4>
+              <div id="lastOutput" class="output-view muted">No output yet.</div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
 
   <script>
     const filters = ['all', 'info', 'success', 'warn', 'error'];
+    const agentCommandEndpoints = {
+      'travel-concierge': 'http://127.0.0.1:18890'
+    };
+
     let currentFilter = 'all';
-    let state = { agents: [], logs: [] };
+    let selectedAgentFilter = 'all';
+    let searchTerm = '';
     let startedAtMs = Date.now();
+    let autoRefreshEnabled = true;
+    let refreshHandle = null;
+    let state = { agents: [], logs: [] };
+    let lastTravelOutput = null;
     const seenLogIds = new Set();
 
     const filterBar = document.getElementById('filters');
+    const kpiGrid = document.getElementById('kpiGrid');
     const agentList = document.getElementById('agentList');
     const logFeed = document.getElementById('logFeed');
-    const stats = document.getElementById('stats');
     const uptime = document.getElementById('uptime');
+    const searchInput = document.getElementById('searchInput');
+    const refreshNowBtn = document.getElementById('refreshNowBtn');
+    const autoRefreshBtn = document.getElementById('autoRefreshBtn');
+    const targetAgent = document.getElementById('targetAgent');
+    const promptInput = document.getElementById('promptInput');
+    const runPromptBtn = document.getElementById('runPromptBtn');
+    const commandStatus = document.getElementById('commandStatus');
+    const checkHealthBtn = document.getElementById('checkHealthBtn');
+    const healthStatus = document.getElementById('healthStatus');
+    const githubPulse = document.getElementById('githubPulse');
+    const lastOutput = document.getElementById('lastOutput');
 
     function secondsToClock(totalSeconds) {
       const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
@@ -427,35 +689,81 @@
       }
     }
 
-    function renderAgents() {
+    function renderKpis() {
+      const logs = state.logs || [];
+      const agents = state.agents || [];
+      const running = agents.filter((a) => a.status === 'running').length;
+      const stopped = agents.filter((a) => a.status !== 'running').length;
+      const errors = logs.filter((l) => l.level === 'error').length;
+      const warns = logs.filter((l) => l.level === 'warn').length;
+
+      const kpis = [
+        ['Agents', agents.length],
+        ['Running', running],
+        ['Stopped', stopped],
+        ['Errors', errors],
+        ['Warnings', warns],
+        ['Logs', logs.length]
+      ];
+
+      kpiGrid.innerHTML = '';
+      for (const [label, value] of kpis) {
+        const card = document.createElement('div');
+        card.className = 'kpi';
+        card.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+        kpiGrid.appendChild(card);
+      }
+    }
+
+    function renderAgentRegistry() {
       const list = state.agents || [];
       if (!list.length) {
         agentList.innerHTML = '<div class="empty">No agents registered yet.</div>';
+        targetAgent.innerHTML = '<option value="">No agents available</option>';
         return;
       }
+
       agentList.innerHTML = '';
+      const optionNodes = ['<option value="all">All Agents</option>'];
       for (const agent of list) {
-        const card = document.createElement('div');
-        card.className = 'agent-card';
         const running = agent.status === 'running';
+        const name = agent.name || 'unknown-agent';
+        optionNodes.push(`<option value="${name}">${name}</option>`);
+
+        const card = document.createElement('div');
+        card.className = `agent-card${selectedAgentFilter === name ? ' active' : ''}`;
         const startedText = elapsedSince(agent.startedAt || agent.lastSeen || new Date().toISOString());
         const lastSeenText = agent.lastSeen ? new Date(agent.lastSeen).toLocaleTimeString() : '-';
         card.innerHTML = `
           <div class="agent-head">
-            <strong>${agent.name || 'unknown-agent'}</strong>
+            <strong>${name}</strong>
             <span><span class="status-dot ${running ? 'status-running' : 'status-stopped'}"></span>${running ? 'running' : 'stopped'}</span>
           </div>
           <div class="agent-sub">running: ${startedText}</div>
           <div class="agent-sub">last seen: ${lastSeenText}</div>
+          <div class="agent-sub">click to focus feed</div>
         `;
+        card.addEventListener('click', () => {
+          selectedAgentFilter = selectedAgentFilter === name ? 'all' : name;
+          renderAgentRegistry();
+          renderLogs();
+        });
         agentList.appendChild(card);
       }
+
+      const prev = targetAgent.value;
+      targetAgent.innerHTML = optionNodes.join('');
+      targetAgent.value = prev && Array.from(targetAgent.options).some((o) => o.value === prev) ? prev : 'all';
     }
 
     function filteredLogs() {
       const logs = (state.logs || []).slice().reverse();
-      if (currentFilter === 'all') return logs;
-      return logs.filter((entry) => entry.level === currentFilter);
+      return logs.filter((entry) => {
+        if (currentFilter !== 'all' && entry.level !== currentFilter) return false;
+        if (selectedAgentFilter !== 'all' && entry.agent !== selectedAgentFilter) return false;
+        if (searchTerm && !String(entry.message || '').toLowerCase().includes(searchTerm)) return false;
+        return true;
+      });
     }
 
     function rowIsNew(id) {
@@ -468,19 +776,18 @@
     function renderLogs() {
       const logs = filteredLogs();
       if (!logs.length) {
-        logFeed.innerHTML = '<div class="empty">⏳ Waiting for agents to start...</div>';
+        logFeed.innerHTML = '<div class="empty">No log rows match your current filters.</div>';
         return;
       }
 
       logFeed.innerHTML = '';
       for (const entry of logs) {
         const row = document.createElement('div');
-        row.className = `log-row level-${entry.level || 'info'}`;
-        if (rowIsNew(entry.id)) {
-          row.style.animation = 'slideIn 260ms ease';
-        }
-        const ts = entry.time ? new Date(entry.time).toLocaleTimeString() : '--:--:--';
         const level = (entry.level || 'info').toLowerCase();
+        row.className = `log-row level-${level}`;
+        if (rowIsNew(entry.id)) row.style.animation = 'slideIn 260ms ease';
+
+        const ts = entry.time ? new Date(entry.time).toLocaleTimeString() : '--:--:--';
         row.innerHTML = `
           <div class="log-meta">
             <span>${ts}</span>
@@ -493,28 +800,144 @@
       }
     }
 
-    function countMatches(re) {
-      return (state.logs || []).filter((entry) => re.test(entry.message || '')).length;
+    function detectPulseTag(message) {
+      const text = String(message || '').toLowerCase();
+      if (text.includes('new issue') || text.includes('urgent bug') || text.includes('error checking repo')) return 'issue';
+      if (text.includes('new pr') || text.includes('pr comment posted')) return 'pr';
+      if (text.includes('new commit') || text.includes('commit review posted')) return 'commit';
+      if (text.includes('failed') || text.includes('error')) return 'alert';
+      return 'issue';
     }
 
-    function renderStats() {
-      const total = (state.logs || []).length;
-      const bugs = countMatches(/URGENT|BUG/i);
-      const posted = countMatches(/posted/i);
-      const errors = (state.logs || []).filter((entry) => entry.level === 'error').length;
+    function renderGithubPulse() {
+      const watcherLogs = (state.logs || [])
+        .filter((entry) => entry.agent === 'github-watcher')
+        .slice()
+        .reverse()
+        .slice(0, 10);
 
-      stats.innerHTML = '';
-      const cards = [
-        ['Total Logs', total],
-        ['Bugs Detected', bugs],
-        ['Comments Posted', posted],
-        ['Errors', errors]
-      ];
-      for (const [label, value] of cards) {
-        const card = document.createElement('div');
-        card.className = 'stat';
-        card.innerHTML = `<div class="stat-label">${label}</div><div class="stat-value">${value}</div>`;
-        stats.appendChild(card);
+      if (!watcherLogs.length) {
+        githubPulse.innerHTML = '<li class="muted">No github-watcher events yet.</li>';
+        return;
+      }
+
+      githubPulse.innerHTML = watcherLogs.map((entry) => {
+        const time = entry.time ? new Date(entry.time).toLocaleTimeString() : '--:--:--';
+        const tag = detectPulseTag(entry.message);
+        return `
+          <li class="pulse-item">
+            <div class="pulse-meta">
+              <span>${time}</span>
+              <span class="pulse-tag ${tag}">${tag}</span>
+              <span>${entry.level || 'info'}</span>
+            </div>
+            <div class="pulse-text">${escapeHtml(entry.message || '')}</div>
+          </li>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(text) {
+      return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatOutputText(rawText) {
+      const lines = String(rawText || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim());
+
+      const headingSet = new Set([
+        'Machine outputs',
+        'Agent negotiation round',
+        'Completion',
+        'Advisories'
+      ]);
+
+      const nonEmpty = lines.filter((line) => line.length > 0);
+      if (!nonEmpty.length) {
+        return '<div class="muted">No output yet.</div>';
+      }
+
+      const title = nonEmpty[0];
+      const sections = [];
+      let current = { heading: null, rows: [], bullets: [] };
+
+      function pushCurrent() {
+        if (current.heading || current.rows.length || current.bullets.length) {
+          sections.push(current);
+        }
+      }
+
+      for (let i = 1; i < nonEmpty.length; i += 1) {
+        const line = nonEmpty[i];
+
+        if (line.endsWith(':') || headingSet.has(line)) {
+          pushCurrent();
+          const heading = line.endsWith(':') ? line.slice(0, -1) : line;
+          current = { heading, rows: [], bullets: [] };
+          continue;
+        }
+
+        if (line.startsWith('- ')) {
+          current.bullets.push(line.slice(2));
+          continue;
+        }
+
+        if ((current.heading === 'Advisories' || current.heading === 'Agent negotiation round') && !line.includes(':')) {
+          current.bullets.push(line);
+        } else {
+          current.rows.push(line);
+        }
+      }
+      pushCurrent();
+
+      let html = `<div class="output-title">${escapeHtml(title)}</div>`;
+
+      for (const section of sections) {
+        html += '<section class="output-section">';
+        if (section.heading) {
+          html += `<h5>${escapeHtml(section.heading)}</h5>`;
+        }
+
+        for (const row of section.rows) {
+          const pair = row.match(/^([^:]+):\s*(.+)$/);
+          if (pair) {
+            html += `<div class="output-row"><span class="output-key">${escapeHtml(pair[1])}:</span> ${escapeHtml(pair[2])}</div>`;
+          } else {
+            html += `<div class="output-row">${escapeHtml(row)}</div>`;
+          }
+        }
+
+        if (section.bullets.length) {
+          html += '<ul class="output-list">';
+          for (const bullet of section.bullets) {
+            html += `<li>${escapeHtml(bullet)}</li>`;
+          }
+          html += '</ul>';
+        }
+
+        html += '</section>';
+      }
+
+      return html;
+    }
+
+    async function loadTravelOutput() {
+      try {
+        const res = await fetch('./travel-response.json', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.output && (!lastTravelOutput || lastTravelOutput.id !== data.id)) {
+          lastTravelOutput = data;
+          lastOutput.classList.remove('muted');
+          lastOutput.innerHTML = formatOutputText(data.output);
+        }
+      } catch (_err) {
       }
     }
 
@@ -527,33 +950,132 @@
           agents: Array.isArray(data.agents) ? data.agents : [],
           logs: Array.isArray(data.logs) ? data.logs : []
         };
+
         const runningStarts = state.agents
           .filter((agent) => agent && agent.startedAt)
           .map((agent) => new Date(agent.startedAt).getTime())
           .filter((value) => !Number.isNaN(value));
-        if (runningStarts.length) {
-          startedAtMs = Math.min(...runningStarts);
-        }
-        renderAgents();
+        if (runningStarts.length) startedAtMs = Math.min(...runningStarts);
+
+        renderKpis();
+        renderAgentRegistry();
         renderLogs();
-        renderStats();
+        renderGithubPulse();
+        await loadTravelOutput();
       } catch (_err) {
         state = { agents: [], logs: [] };
-        renderAgents();
-        logFeed.innerHTML = '<div class="empty">⏳ Waiting for agents to start...</div>';
-        renderStats();
+        renderKpis();
+        renderAgentRegistry();
+        logFeed.innerHTML = '<div class="empty">Waiting for logs.json feed...</div>';
+        renderGithubPulse();
       }
     }
 
     function tickUptime() {
       const seconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
       uptime.textContent = secondsToClock(seconds);
-      renderAgents();
+      renderAgentRegistry();
     }
 
+    function setAutoRefresh(enabled) {
+      autoRefreshEnabled = enabled;
+      autoRefreshBtn.textContent = `Auto Refresh: ${enabled ? 'ON' : 'OFF'}`;
+      autoRefreshBtn.classList.toggle('primary', enabled);
+
+      if (refreshHandle) {
+        clearInterval(refreshHandle);
+        refreshHandle = null;
+      }
+
+      if (enabled) refreshHandle = setInterval(loadLogs, 3000);
+    }
+
+    async function dispatchPrompt() {
+      const target = targetAgent.value;
+      const prompt = String(promptInput.value || '').trim();
+
+      if (!target || target === 'all') {
+        commandStatus.textContent = 'Pick a specific target agent first.';
+        return;
+      }
+      if (!prompt) {
+        commandStatus.textContent = 'Prompt is empty.';
+        return;
+      }
+
+      const base = agentCommandEndpoints[target];
+      if (!base) {
+        commandStatus.textContent = `${target} does not expose a prompt API yet. Select an agent with (api).`;
+        return;
+      }
+
+      runPromptBtn.disabled = true;
+      commandStatus.textContent = `Dispatching to ${target}...`;
+
+      try {
+        const res = await fetch(`${base}/api/travel/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        commandStatus.textContent = `Queued ${target} prompt id ${data.id}.`;
+      } catch (err) {
+        commandStatus.textContent = `Dispatch failed: ${err.message}`;
+      } finally {
+        runPromptBtn.disabled = false;
+      }
+    }
+
+    async function checkIntegrationHealth() {
+      const target = targetAgent.value && targetAgent.value !== 'all' ? targetAgent.value : 'travel-concierge';
+      const base = agentCommandEndpoints[target];
+      if (!base) {
+        const agent = (state.agents || []).find((item) => item.name === target);
+        if (!agent) {
+          healthStatus.textContent = `No health endpoint mapped for ${target} and no runtime status found.`;
+          return;
+        }
+
+        const lastSeenMs = new Date(agent.lastSeen || 0).getTime();
+        const ageSec = Number.isNaN(lastSeenMs) ? null : Math.max(0, Math.floor((Date.now() - lastSeenMs) / 1000));
+        if (agent.status === 'running' && ageSec !== null && ageSec <= 45) {
+          healthStatus.textContent = `${target} healthy via log heartbeat (last seen ${ageSec}s ago).`;
+        } else if (agent.status === 'running') {
+          healthStatus.textContent = `${target} running but heartbeat is stale. Last seen ${ageSec === null ? 'unknown' : `${ageSec}s ago`}.`;
+        } else {
+          healthStatus.textContent = `${target} is currently stopped.`;
+        }
+        return;
+      }
+      healthStatus.textContent = 'Checking...';
+      try {
+        const res = await fetch(`${base}/health`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error('health check failed');
+        healthStatus.textContent = `Healthy. Queue depth ${data.queueDepth}.`;
+      } catch (err) {
+        healthStatus.textContent = `Health check failed: ${err.message}`;
+      }
+    }
+
+    searchInput.addEventListener('input', (event) => {
+      searchTerm = String(event.target.value || '').trim().toLowerCase();
+      renderLogs();
+    });
+
+    refreshNowBtn.addEventListener('click', loadLogs);
+    autoRefreshBtn.addEventListener('click', () => setAutoRefresh(!autoRefreshEnabled));
+    runPromptBtn.addEventListener('click', dispatchPrompt);
+    checkHealthBtn.addEventListener('click', checkIntegrationHealth);
+    promptInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) dispatchPrompt();
+    });
+
     buildFilters();
+    setAutoRefresh(true);
     loadLogs();
-    setInterval(loadLogs, 3000);
     setInterval(tickUptime, 1000);
   </script>
 </body>
