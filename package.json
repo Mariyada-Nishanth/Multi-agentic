@@ -1,0 +1,9 @@
+{
+  "name": "openclaw-agents",
+  "version": "1.0.0",
+  "description": "Autonomous AI agents powered by OpenClaw + Groq",
+  "scripts": {
+    "start": "node start-agents.js"
+  },
+  "engines": { "node": ">=18" }
+}

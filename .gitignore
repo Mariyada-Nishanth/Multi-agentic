@@ -1,0 +1,4 @@
+node_modules/
+config/github-watch.json
+dashboard/logs.json
+.env

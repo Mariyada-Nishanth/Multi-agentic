@@ -1,0 +1,13 @@
+{
+  "repos": [
+    {
+      "owner": "YOUR_GITHUB_OWNER_HERE",
+      "repo": "YOUR_REPO_NAME_HERE",
+      "actions": {
+        "new_issue": "YOUR_NEW_ISSUE_ACTION_HERE",
+        "new_pr": "YOUR_NEW_PR_ACTION_HERE"
+      }
+    }
+  ],
+  "github_token": "YOUR_GITHUB_TOKEN_HERE"
+}
