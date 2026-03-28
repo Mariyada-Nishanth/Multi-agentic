@@ -2,11 +2,24 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const ROOT = path.resolve(__dirname);
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DASHBOARD_PORT = Number(process.env.DASHBOARD_PORT || 8080);
 const GITHUB_WATCH_CONFIG_PATH = path.join(REPO_ROOT, 'config', 'github-watch.json');
+const OPENCLAW_RUNTIME_CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+
+const COUNCIL_ROLE_MODEL_PRESETS = {
+  researcher: ['EldritchLabs/MN-12B-Mag-Mell-R1-Uncensored-Scale1.2', 'Aether-Agi/aether-v4'],
+  security: ['EldritchLabs/MN-12B-Mag-Mell-R1-Uncensored-Scale1.2', 'Aether-Agi/aether-v4'],
+  coder: ['EldritchLabs/MN-12B-Mag-Mell-R1-Uncensored-Scale1.2', 'Aether-Agi/aether-v4'],
+  reviewer: ['EldritchLabs/MN-12B-Mag-Mell-R1-Uncensored-Scale1.2', 'Aether-Agi/aether-v4'],
+  notifier: ['EldritchLabs/MN-12B-Mag-Mell-R1-Uncensored-Scale1.2', 'Aether-Agi/aether-v4']
+};
+
+let openclawConfigCache = null;
+let openclawConfigCacheAt = 0;
 
 function readGithubWatchConfig() {
   try {
@@ -18,6 +31,50 @@ function readGithubWatchConfig() {
 
 function writeGithubWatchConfig(cfg) {
   fs.writeFileSync(GITHUB_WATCH_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+}
+
+function readOpenClawRuntimeConfig() {
+  const now = Date.now();
+  if (openclawConfigCache && now - openclawConfigCacheAt < 15000) {
+    return openclawConfigCache;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(OPENCLAW_RUNTIME_CONFIG_PATH, 'utf8'));
+    openclawConfigCache = parsed;
+    openclawConfigCacheAt = now;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function resolveFeatherlessConfig() {
+  const runtimeCfg = readOpenClawRuntimeConfig();
+  if (!runtimeCfg || !runtimeCfg.models || !runtimeCfg.models.providers) {
+    return null;
+  }
+
+  const providers = runtimeCfg.models.providers;
+  const providerEntry = Object.entries(providers).find(([, value]) => {
+    const base = String(value && value.baseUrl || '').toLowerCase();
+    return base.includes('api.featherless.ai');
+  });
+
+  if (!providerEntry) return null;
+  const [providerKey, provider] = providerEntry;
+  const apiKey = String(provider.apiKey || '').trim();
+  const baseUrl = String(provider.baseUrl || '').trim();
+  const models = Array.isArray(provider.models) ? provider.models.map((item) => String(item && item.id || '').trim()).filter(Boolean) : [];
+  const defaultModelRef = String(runtimeCfg.agents && runtimeCfg.agents.defaults && runtimeCfg.agents.defaults.model || '').trim();
+
+  return {
+    providerKey,
+    apiKey,
+    baseUrl,
+    models,
+    defaultModelRef
+  };
 }
 
 function normalizeRepoEntry(entry) {
@@ -224,7 +281,100 @@ function extractResponseText(data) {
   return '';
 }
 
-async function proxyGlobalChat(message) {
+function extractBalancedJsonObject(inputText) {
+  const text = String(inputText || '');
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseCouncilAgentReply(rawText, agentId) {
+  const text = String(rawText || '').trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidates = [];
+  if (fenced && fenced[1]) candidates.push(fenced[1]);
+  candidates.push(text);
+
+  for (const candidate of candidates) {
+    const objectText = extractBalancedJsonObject(candidate);
+    if (!objectText) continue;
+
+    const attempts = [
+      objectText,
+      objectText.replace(/,\s*([}\]])/g, '$1')
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        const parsed = JSON.parse(attempt);
+        const vote = String(parsed.vote || '').toLowerCase();
+        const recommendation = String(parsed.recommendation || '').trim().slice(0, 140);
+        const rationale = String(parsed.rationale || '').trim().slice(0, 280);
+        const actions = Array.isArray(parsed.actions)
+          ? parsed.actions
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, 2)
+          : [];
+        return {
+          // Always pin result to the requested role to avoid cross-role label drift.
+          agent: agentId,
+          vote: vote === 'approve' || vote === 'reject' || vote === 'needs-human' ? vote : 'needs-human',
+          recommendation: recommendation || 'short',
+          rationale,
+          actions
+        };
+      } catch {
+      }
+    }
+  }
+
+  return {
+    agent: agentId,
+    vote: 'needs-human',
+    recommendation: 'Model response was not strict JSON.',
+    rationale: text.slice(0, 300),
+    actions: []
+  };
+}
+
+async function proxyGatewayChat(message, options = {}) {
+  const session = String(options.session || 'dashboard');
+  const agent = String(options.agent || 'main');
   const cfg = readGithubWatchConfig();
   const host = String(cfg.openclaw_base || '127.0.0.1');
   const port = Number(cfg.openclaw_port || 18789);
@@ -245,8 +395,8 @@ async function proxyGlobalChat(message) {
           }
         : {
             message,
-            session: 'dashboard',
-            agent: 'main'
+            session,
+            agent
           };
 
       const result = await sendGatewayRequest(pathname, body, token, host, port);
@@ -281,6 +431,347 @@ async function proxyGlobalChat(message) {
   return {
     ok: false,
     error: lastError
+  };
+}
+
+async function proxyGlobalChat(message) {
+  return proxyGatewayChat(message, { session: 'dashboard', agent: 'main' });
+}
+
+function requestFeatherlessChat({ apiKey, model, messages, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model,
+      messages,
+      temperature: 0.2,
+      top_p: 0.9,
+      max_tokens: 220
+    });
+
+    const req = https.request({
+      hostname: 'api.featherless.ai',
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: timeoutMs
+    }, (res) => {
+      let raw = '';
+      res.on('data', (chunk) => {
+        raw += chunk;
+      });
+      res.on('end', () => {
+        if ((res.statusCode || 0) >= 400) {
+          reject(new Error(`Featherless HTTP ${res.statusCode}`));
+          return;
+        }
+
+        let parsed = {};
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch (err) {
+          reject(new Error(`Featherless parse failed: ${err.message}`));
+          return;
+        }
+
+        const choice = Array.isArray(parsed.choices) ? parsed.choices[0] : null;
+        const msg = choice && choice.message ? choice.message : {};
+        const text = String(msg.content || msg.reasoning || '').trim();
+        if (!text) {
+          reject(new Error('Featherless returned empty response text'));
+          return;
+        }
+
+        resolve({ text, raw: parsed });
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`timeout after ${timeoutMs}ms`));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function runCouncilRoleFastPath(spec, problem, timeoutMs) {
+  const featherless = resolveFeatherlessConfig();
+  if (!featherless || !featherless.apiKey) {
+    return { ok: false, error: 'Featherless config unavailable' };
+  }
+
+  const modelCandidates = COUNCIL_ROLE_MODEL_PRESETS[spec.id] || [];
+  const configuredModel = String((featherless.defaultModelRef || '').split('/').slice(1).join('/') || '').trim();
+  const available = new Set(featherless.models || []);
+  const candidateList = [];
+
+  for (const model of modelCandidates) candidateList.push(model);
+  if (configuredModel) candidateList.push(configuredModel);
+
+  const deduped = Array.from(new Set(candidateList)).filter((model) => !available.size || available.has(model));
+  const maxModelsPerRole = Math.max(1, Math.min(3, Number(process.env.COUNCIL_MAX_MODELS_PER_ROLE || 1)));
+  const models = (deduped.length ? deduped : modelCandidates).slice(0, maxModelsPerRole);
+  const deadline = Date.now() + Math.max(2000, Number(timeoutMs || 0));
+
+  const prompt = [
+    `Role: ${spec.role}`,
+    `Goal: ${spec.goal}`,
+    'You are one member in an AI Agents Council.',
+    'Decide quickly and return strict compact JSON only.',
+    'Keep recommendation <= 80 chars and rationale <= 160 chars.',
+    'Actions must contain at most 2 short items.',
+    '',
+    'Problem:',
+    problem,
+    '',
+    'JSON schema:',
+    '{"agent":"researcher|security|coder|reviewer|notifier","vote":"approve|reject|needs-human","recommendation":"<=80 chars","rationale":"<=160 chars","actions":["<=2 actions"]}'
+  ].join('\n');
+
+  let lastError = 'Featherless request failed';
+  let lastModel = '';
+  for (const model of models) {
+    const remainingBeforeCall = deadline - Date.now();
+    if (remainingBeforeCall < 1200) {
+      lastError = 'role time budget exhausted';
+      break;
+    }
+
+    try {
+      lastModel = model;
+      const completion = await requestFeatherlessChat({
+        apiKey: featherless.apiKey,
+        model,
+        timeoutMs: Math.max(1200, Math.min(3500, remainingBeforeCall - 300)),
+        messages: [
+          { role: 'system', content: 'Return strict JSON only. No markdown.' },
+          { role: 'user', content: prompt }
+        ]
+      });
+      const firstText = String(completion.text || '').trim();
+      try {
+        JSON.parse(extractJsonObject(firstText));
+        return { ok: true, text: firstText, model };
+      } catch {
+        // One quick retry with stricter guardrails for JSON compliance.
+        const remainingForRetry = deadline - Date.now();
+        if (remainingForRetry < 1200) {
+          return { ok: true, text: firstText, model };
+        }
+
+        const retryPrompt = [
+          `Role: ${spec.role}`,
+          `Goal: ${spec.goal}`,
+          'Return ONLY one valid minified JSON object.',
+          'No markdown, no commentary, no backticks.',
+          'recommendation <= 80 chars, rationale <= 160 chars, actions <= 2.',
+          '',
+          `Issue: ${problem}`,
+          '',
+          'Schema:',
+          '{"agent":"researcher|security|coder|reviewer|notifier","vote":"approve|reject|needs-human","recommendation":"string","rationale":"string","actions":["string"]}'
+        ].join('\n');
+        const retry = await requestFeatherlessChat({
+          apiKey: featherless.apiKey,
+          model,
+          timeoutMs: Math.max(1200, Math.min(2500, remainingForRetry - 200)),
+          messages: [
+            { role: 'system', content: 'JSON only. Single object.' },
+            { role: 'user', content: retryPrompt }
+          ]
+        });
+        const retryText = String(retry.text || '').trim();
+        return { ok: true, text: retryText || firstText, model };
+      }
+    } catch (err) {
+      lastError = err.message || 'Featherless request failed';
+    }
+  }
+
+  return { ok: false, error: lastError, model: lastModel || undefined };
+}
+
+async function runAgentsCouncil(problem) {
+  const councilStartedAt = Date.now();
+  const specs = [
+    {
+      id: 'researcher',
+      role: 'Researcher',
+      goal: 'Find the probable root cause and supporting evidence.'
+    },
+    {
+      id: 'security',
+      role: 'Security',
+      goal: 'Identify security risks, abuse paths, and required safeguards.'
+    },
+    {
+      id: 'coder',
+      role: 'Coder',
+      goal: 'Propose concrete implementation fix steps.'
+    },
+    {
+      id: 'reviewer',
+      role: 'Reviewer',
+      goal: 'Assess quality, test coverage, and rollout confidence.'
+    },
+    {
+      id: 'notifier',
+      role: 'Notifier',
+      goal: 'Summarize stakeholder communication and incident updates.'
+    }
+  ];
+
+  const withTimeout = (promise, ms) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+
+  const runWithConcurrency = async (items, limit, worker) => {
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    const runners = Array.from({ length: Math.max(1, limit) }, async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) break;
+        results[index] = await worker(items[index], index);
+      }
+    });
+
+    await Promise.all(runners);
+    return results;
+  };
+
+  const roleConcurrency = Math.max(1, Math.min(4, Number(process.env.COUNCIL_ROLE_CONCURRENCY || 3)));
+  const roleTimeoutMs = Math.max(2500, Math.min(15000, Number(process.env.COUNCIL_ROLE_TIMEOUT_MS || 6000)));
+  const useGatewayFallback = String(process.env.COUNCIL_GATEWAY_FALLBACK || '0') === '1';
+
+  const results = await runWithConcurrency(specs, roleConcurrency, async (spec) => {
+    const roleStartedAt = Date.now();
+    const finalize = (payload) => ({
+      ...payload,
+      latencyMs: Date.now() - roleStartedAt
+    });
+
+    const fast = await runCouncilRoleFastPath(spec, problem, roleTimeoutMs);
+    if (fast.ok) {
+      const parsed = parseCouncilAgentReply(fast.text, spec.id);
+      parsed.model = fast.model;
+      parsed.engine = 'featherless-direct';
+      return finalize(parsed);
+    }
+
+    if (!useGatewayFallback) {
+      return finalize({
+        agent: spec.id,
+        vote: 'needs-human',
+        recommendation: `Council agent failed: ${fast.error || 'fast-path failure'}`,
+        rationale: 'Escalating due to direct model failure.',
+        actions: [],
+        model: fast.model || 'n/a',
+        engine: 'featherless-direct'
+      });
+    }
+
+    const gatewayPrompt = [
+      `You are ${spec.role} in an AI Agents Council.`,
+      `Goal: ${spec.goal}`,
+      'Return strict JSON only.',
+      '',
+      'Problem:',
+      problem,
+      '',
+      'JSON schema:',
+      '{"agent":"researcher|security|coder|reviewer|notifier","vote":"approve|reject|needs-human","recommendation":"short","rationale":"short","actions":["a1","a2"]}'
+    ].join('\n');
+
+    let response;
+    try {
+      response = await withTimeout(proxyGatewayChat(gatewayPrompt, {
+        session: `council:${spec.id}`,
+        agent: 'main'
+      }), 12000);
+    } catch (err) {
+      return finalize({
+        agent: spec.id,
+        vote: 'needs-human',
+        recommendation: `Council agent failed: ${err.message || 'unknown error'}`,
+        rationale: 'Escalating due to model call failure.',
+        actions: [],
+        engine: 'gateway-fallback'
+      });
+    }
+
+    if (!response.ok) {
+      return finalize({
+        agent: spec.id,
+        vote: 'needs-human',
+        recommendation: `Council agent failed: ${response.error || 'unknown error'}`,
+        rationale: 'Escalating due to model call failure.',
+        actions: [],
+        engine: 'gateway-fallback'
+      });
+    }
+
+    const parsed = parseCouncilAgentReply(response.text || response.raw || '', spec.id);
+    parsed.engine = 'gateway-fallback';
+    return finalize(parsed);
+  });
+
+  const totalLatencyMs = Date.now() - councilStartedAt;
+  const slowest = results.reduce((winner, item) => {
+    if (!item || typeof item !== 'object') return winner;
+    const current = Number(item.latencyMs || 0);
+    if (!winner || current > winner.latencyMs) {
+      return { agent: String(item.agent || ''), latencyMs: current };
+    }
+    return winner;
+  }, null);
+
+  const counts = {
+    approve: results.filter((r) => r.vote === 'approve').length,
+    reject: results.filter((r) => r.vote === 'reject').length,
+    needsHuman: results.filter((r) => r.vote === 'needs-human').length
+  };
+
+  let decision = 'escalate-human';
+  let summary = 'Conflict detected. Escalate to human reviewer.';
+
+  if (counts.needsHuman > 0) {
+    decision = 'escalate-human';
+    summary = 'At least one agent requested human review.';
+  } else if (counts.approve > counts.reject) {
+    decision = 'auto-execute';
+    summary = 'Majority approved. Decision can be executed automatically.';
+  } else if (counts.reject > counts.approve) {
+    decision = 'halt-and-escalate';
+    summary = 'Majority rejected. Halt automation and escalate.';
+  }
+
+  return {
+    ok: true,
+    problem,
+    votes: counts,
+    decision,
+    summary,
+    strategy: useGatewayFallback ? 'featherless-direct-with-gateway-fallback' : 'featherless-direct-fast-fail',
+    latencyMs: totalLatencyMs,
+    slowestRole: slowest,
+    agents: results,
+    generatedAt: new Date().toISOString()
   };
 }
 
@@ -388,6 +879,22 @@ const server = http.createServer(async (req, res) => {
       });
     } catch (err) {
       return sendJson(res, 500, { ok: false, error: err.message || 'proxy error' });
+    }
+  }
+
+  if (req.method === 'POST' && reqUrl.pathname === '/api/agents-council/run') {
+    try {
+      const rawBody = await readBody(req);
+      const parsed = rawBody ? JSON.parse(rawBody) : {};
+      const problem = String(parsed.problem || parsed.message || '').trim();
+      if (!problem) {
+        return sendJson(res, 400, { ok: false, error: 'problem is required' });
+      }
+
+      const result = await runAgentsCouncil(problem);
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: err.message || 'agents council failed' });
     }
   }
 

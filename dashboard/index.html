@@ -466,6 +466,43 @@
       letter-spacing: 0.4px;
     }
 
+    .command-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      padding: 6px 0;
+      background: linear-gradient(180deg, rgba(15, 22, 32, 0.98), rgba(15, 22, 32, 0.9));
+    }
+
+    .tab-btn {
+      border: 1px solid #2d3b50;
+      background: rgba(23, 30, 42, 0.9);
+      color: #dce7f7;
+      border-radius: 999px;
+      font: inherit;
+      font-size: 11px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      border-color: #7d3518;
+      background: rgba(224, 90, 30, 0.2);
+      color: #ffe6d9;
+    }
+
+    .tab-content {
+      display: none;
+      gap: 8px;
+    }
+
+    .tab-content.active {
+      display: grid;
+    }
+
     .inline {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -700,34 +737,57 @@
         <section class="panel">
           <h3>Command Center</h3>
           <div class="right-scroll">
-            <div class="module">
-              <h4>Run Agent Prompt</h4>
-              <select id="targetAgent" class="select"></select>
-              <textarea id="promptInput" class="textarea" placeholder="Plan Goa trip next month for 3 under 45000 budget beach"></textarea>
-              <div class="inline">
-                <span id="commandStatus" class="muted">Ready. Select target agent and run.</span>
-                <button id="runPromptBtn" class="btn primary">Dispatch</button>
+            <div class="command-tabs">
+              <button id="opsTabBtn" class="tab-btn active">Operations</button>
+              <button id="councilTabBtn" class="tab-btn">Agents Council</button>
+            </div>
+
+            <div id="opsTab" class="tab-content active">
+              <div class="module">
+                <h4>Run Agent Prompt</h4>
+                <select id="targetAgent" class="select"></select>
+                <textarea id="promptInput" class="textarea" placeholder="Plan Goa trip next month for 3 under 45000 budget beach"></textarea>
+                <div class="inline">
+                  <span id="commandStatus" class="muted">Ready. Select target agent and run.</span>
+                  <button id="runPromptBtn" class="btn primary">Dispatch</button>
+                </div>
+              </div>
+
+              <div class="module">
+                <h4>Integration Health</h4>
+                <div class="inline">
+                  <span id="healthStatus" class="muted">Not checked yet.</span>
+                  <button id="checkHealthBtn" class="btn">Check</button>
+                </div>
+              </div>
+
+              <div class="module">
+                <h4>GitHub Pulse</h4>
+                <ul id="githubPulse" class="pulse-list">
+                  <li class="muted">Waiting for github-watcher logs...</li>
+                </ul>
+              </div>
+
+              <div class="module">
+                <h4>Last Command Output</h4>
+                <div id="lastOutput" class="output-view muted">No output yet.</div>
               </div>
             </div>
 
-            <div class="module">
-              <h4>Integration Health</h4>
-              <div class="inline">
-                <span id="healthStatus" class="muted">Not checked yet.</span>
-                <button id="checkHealthBtn" class="btn">Check</button>
+            <div id="councilTab" class="tab-content">
+              <div class="module">
+                <h4>Agents Council</h4>
+                <textarea id="councilProblemInput" class="textarea" placeholder="Describe the issue or decision to debate"></textarea>
+                <div class="inline">
+                  <span id="councilStatus" class="muted">Ready. Run a council vote.</span>
+                  <button id="councilRunBtn" class="btn primary">Run Council</button>
+                </div>
               </div>
-            </div>
 
-            <div class="module">
-              <h4>GitHub Pulse</h4>
-              <ul id="githubPulse" class="pulse-list">
-                <li class="muted">Waiting for github-watcher logs...</li>
-              </ul>
-            </div>
-
-            <div class="module">
-              <h4>Last Command Output</h4>
-              <div id="lastOutput" class="output-view muted">No output yet.</div>
+              <div class="module">
+                <h4>Council Outcome</h4>
+                <div id="councilResults" class="output-view muted">No council run yet.</div>
+              </div>
             </div>
           </div>
         </section>
@@ -774,6 +834,14 @@
     const commandStatus = document.getElementById('commandStatus');
     const checkHealthBtn = document.getElementById('checkHealthBtn');
     const healthStatus = document.getElementById('healthStatus');
+    const opsTabBtn = document.getElementById('opsTabBtn');
+    const councilTabBtn = document.getElementById('councilTabBtn');
+    const opsTab = document.getElementById('opsTab');
+    const councilTab = document.getElementById('councilTab');
+    const councilProblemInput = document.getElementById('councilProblemInput');
+    const councilRunBtn = document.getElementById('councilRunBtn');
+    const councilStatus = document.getElementById('councilStatus');
+    const councilResults = document.getElementById('councilResults');
     const githubPulse = document.getElementById('githubPulse');
     const lastOutput = document.getElementById('lastOutput');
     const layoutEl = document.querySelector('.layout');
@@ -951,6 +1019,106 @@
       state.logs = Array.isArray(state.logs) ? [...state.logs, entry] : [entry];
       renderKpis();
       renderLogs();
+    }
+
+    function setCommandTab(tabName) {
+      const isCouncil = tabName === 'council';
+      opsTabBtn.classList.toggle('active', !isCouncil);
+      councilTabBtn.classList.toggle('active', isCouncil);
+      opsTab.classList.toggle('active', !isCouncil);
+      councilTab.classList.toggle('active', isCouncil);
+      const hash = isCouncil ? '#council' : '#ops';
+      if (window.location.hash !== hash) {
+        window.history.replaceState(null, '', hash);
+      }
+    }
+
+    function getInitialCommandTab() {
+      const byHash = String(window.location.hash || '').replace('#', '').toLowerCase();
+      if (byHash === 'council') return 'council';
+      if (byHash === 'ops') return 'ops';
+
+      const byQuery = new URLSearchParams(window.location.search).get('tab');
+      return String(byQuery || '').toLowerCase() === 'council' ? 'council' : 'ops';
+    }
+
+    function renderCouncilOutcome(result) {
+      if (!result || typeof result !== 'object') {
+        councilResults.classList.add('muted');
+        councilResults.textContent = 'No council run yet.';
+        return;
+      }
+
+      const votes = result.votes || {};
+      const agents = Array.isArray(result.agents) ? result.agents : [];
+      let html = '';
+      html += `<div class="output-title">Decision: ${escapeHtml(result.decision || 'unknown')}</div>`;
+      html += `<div class="output-row">${escapeHtml(result.summary || '')}</div>`;
+      html += '<section class="output-section">';
+      html += '<h5>Vote Tally</h5>';
+      html += `<div class="output-row"><span class="output-key">Approve:</span> ${Number(votes.approve || 0)}</div>`;
+      html += `<div class="output-row"><span class="output-key">Reject:</span> ${Number(votes.reject || 0)}</div>`;
+      html += `<div class="output-row"><span class="output-key">Needs Human:</span> ${Number(votes.needsHuman || 0)}</div>`;
+      html += `<div class="output-row"><span class="output-key">Strategy:</span> ${escapeHtml(String(result.strategy || ''))}</div>`;
+      html += `<div class="output-row"><span class="output-key">Total Latency:</span> ${Number(result.latencyMs || 0)} ms</div>`;
+      if (result.slowestRole && typeof result.slowestRole === 'object') {
+        html += `<div class="output-row"><span class="output-key">Slowest Role:</span> ${escapeHtml(String(result.slowestRole.agent || 'unknown'))} (${Number(result.slowestRole.latencyMs || 0)} ms)</div>`;
+      }
+      html += '</section>';
+
+      for (const agent of agents) {
+        const actions = Array.isArray(agent.actions) ? agent.actions : [];
+        html += '<section class="output-section">';
+        html += `<h5>${escapeHtml(String(agent.agent || 'agent'))} (${escapeHtml(String(agent.vote || 'needs-human'))})</h5>`;
+        html += `<div class="output-row"><span class="output-key">Model:</span> ${escapeHtml(String(agent.model || 'n/a'))}</div>`;
+        html += `<div class="output-row"><span class="output-key">Engine:</span> ${escapeHtml(String(agent.engine || 'n/a'))}</div>`;
+        html += `<div class="output-row"><span class="output-key">Latency:</span> ${Number(agent.latencyMs || 0)} ms</div>`;
+        html += `<div class="output-row"><span class="output-key">Recommendation:</span> ${escapeHtml(String(agent.recommendation || ''))}</div>`;
+        html += `<div class="output-row"><span class="output-key">Rationale:</span> ${escapeHtml(String(agent.rationale || ''))}</div>`;
+        if (actions.length) {
+          html += '<ul class="output-list">';
+          for (const action of actions) {
+            html += `<li>${escapeHtml(String(action || ''))}</li>`;
+          }
+          html += '</ul>';
+        }
+        html += '</section>';
+      }
+
+      councilResults.classList.remove('muted');
+      councilResults.innerHTML = html;
+    }
+
+    async function runAgentsCouncilVote() {
+      const problem = String(councilProblemInput.value || '').trim();
+      if (!problem) {
+        councilStatus.textContent = 'Please describe the decision/problem first.';
+        return;
+      }
+
+      councilRunBtn.disabled = true;
+      councilStatus.textContent = 'Running council debate...';
+
+      try {
+        const res = await fetch('/api/agents-council/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ problem })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        renderCouncilOutcome(data);
+        councilStatus.textContent = `Council complete: ${data.decision}`;
+        appendLocalLog('agents-council', 'success', `Council decision ${data.decision}: ${data.summary || ''}`);
+      } catch (err) {
+        councilStatus.textContent = `Council failed: ${err.message}`;
+        appendLocalLog('agents-council', 'error', `Council run failed: ${err.message}`);
+      } finally {
+        councilRunBtn.disabled = false;
+      }
     }
 
     function repoToName(repo) {
@@ -1646,6 +1814,9 @@
     globalChatSendBtn.addEventListener('click', sendGlobalChat);
     runPromptBtn.addEventListener('click', dispatchPrompt);
     checkHealthBtn.addEventListener('click', checkIntegrationHealth);
+    opsTabBtn.addEventListener('click', () => setCommandTab('ops'));
+    councilTabBtn.addEventListener('click', () => setCommandTab('council'));
+    councilRunBtn.addEventListener('click', runAgentsCouncilVote);
     repoSelect.addEventListener('change', applyRepoFromDropdown);
     repoSwitchBtn.addEventListener('click', applyRepoFromInput);
     repoInput.addEventListener('keydown', (event) => {
@@ -1666,6 +1837,7 @@
 
     buildFilters();
     setupResizableLayout();
+    setCommandTab(getInitialCommandTab());
     loadRepoSelector();
     loadOpenClawRuntimeConfig().then(() => {
       const tokenText = openclawRuntime.token ? 'token loaded' : 'token not set';

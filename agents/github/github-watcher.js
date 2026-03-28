@@ -47,6 +47,105 @@ function shouldRetryGithubError(err) {
   return ['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(code);
 }
 
+function responseToText(response) {
+  if (!response || typeof response !== 'object') return String(response || '');
+  return String(response.text || response.message || JSON.stringify(response));
+}
+
+function extractBalancedJsonObject(inputText) {
+  const text = String(inputText || '');
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseReviewPayload(text, fallback) {
+  const rawText = String(text || '').trim();
+  const fenceMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidates = [];
+  if (fenceMatch && fenceMatch[1]) candidates.push(fenceMatch[1]);
+  candidates.push(rawText);
+
+  for (const candidate of candidates) {
+    const jsonBlock = extractBalancedJsonObject(candidate);
+    if (!jsonBlock) continue;
+
+    const attempts = [
+      jsonBlock,
+      jsonBlock.replace(/,\s*([}\]])/g, '$1')
+    ];
+
+    for (const body of attempts) {
+      try {
+        const parsed = JSON.parse(body);
+        return {
+          ...fallback,
+          ...parsed,
+          risks: Array.isArray(parsed.risks) ? parsed.risks : (fallback.risks || []),
+          suggested_fixes: Array.isArray(parsed.suggested_fixes) ? parsed.suggested_fixes : (fallback.suggested_fixes || []),
+          tests: Array.isArray(parsed.tests) ? parsed.tests : (fallback.tests || [])
+        };
+      } catch {
+      }
+    }
+  }
+
+  return null;
+}
+
+async function askOpenClawForReviewJson(prompt, fallback) {
+  const first = await askOpenClaw(prompt);
+  const firstText = responseToText(first);
+  const parsedFirst = parseReviewPayload(firstText, fallback);
+  if (parsedFirst) return parsedFirst;
+
+  const strictPrompt = `${prompt}\n\nIMPORTANT: Return strict raw JSON only. No markdown, no code fence, no commentary.`;
+  const second = await askOpenClaw(strictPrompt);
+  const secondText = responseToText(second);
+  const parsedSecond = parseReviewPayload(secondText, fallback);
+  if (parsedSecond) return parsedSecond;
+
+  const snippet = (secondText || firstText || '').slice(0, 300).replace(/\s+/g, ' ').trim();
+  return {
+    ...fallback,
+    summary: snippet ? `Model returned non-JSON review output: ${snippet}` : 'Model returned non-JSON review output.'
+  };
+}
+
 function loadState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -184,19 +283,11 @@ Reply ONLY with JSON:
 }
 `.trim();
 
-  const response = await askOpenClaw(prompt);
-  const text = response.text || response.message || JSON.stringify(response);
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-  if (!jsonMatch) {
-    return {
-      summary: 'Unable to parse OpenClaw response.',
-      risks: [],
-      suggested_fixes: []
-    };
-  }
-
-  return JSON.parse(jsonMatch[0]);
+  return askOpenClawForReviewJson(prompt, {
+    summary: 'Unable to parse OpenClaw response.',
+    risks: [],
+    suggested_fixes: []
+  });
 }
 
 function postComment(owner, repo, number, body) {
@@ -241,20 +332,12 @@ Analyze the PR for bugs, risks, missing tests, and suggest fixes. Reply ONLY wit
 }
 `.trim();
 
-  const response = await askOpenClaw(prompt);
-  const text = response.text || response.message || JSON.stringify(response);
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-  if (!jsonMatch) {
-    return {
-      summary: 'Unable to parse OpenClaw response.',
-      risks: [],
-      suggested_fixes: [],
-      tests: []
-    };
-  }
-
-  return JSON.parse(jsonMatch[0]);
+  return askOpenClawForReviewJson(prompt, {
+    summary: 'Unable to parse OpenClaw response.',
+    risks: [],
+    suggested_fixes: [],
+    tests: []
+  });
 }
 
 function classifyIssue(title, body) {
