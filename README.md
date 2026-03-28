@@ -1,52 +1,99 @@
 # OpenClaw Agents
 
-Autonomous AI agents that monitor GitHub activity and route analysis through OpenClaw.
+A compact multi-agent runtime for GitHub monitoring, travel planning, and OpenClaw-backed decision support.
 
-## Architecture
+## What This Project Does
 
-Flow:
+- Runs multiple local agents from one launcher.
+- Streams agent logs into a dashboard feed.
+- Proxies dashboard prompts to an OpenClaw gateway.
+- Includes an "agents council" endpoint for structured approve/reject/escalate decisions.
 
-GitHub Issue -> github-watcher.js -> OpenClaw Gateway (localhost:18789) -> Groq LLM -> GitHub Comment posted automatically
+## Components
+
+- Launcher: `start-agents.js`
+- Dashboard server: `dashboard/server.js` (default http://127.0.0.1:8080)
+- GitHub watcher + researcher: `agents/github/`
+- Travel concierge and machine modules: `agents/travel/`
+- Runtime config: `config/github-watch.json`, `config/travel-watch.json`
 
 ## Prerequisites
 
 - Node.js 18+
-- OpenClaw installed and running
-- Groq API key configured inside OpenClaw
+- OpenClaw installed and available in PATH
+- Valid API tokens in config files (GitHub token required for repo discovery)
 
-## Setup
+## Quick Start
 
-1. Clone this project.
-2. Copy `config/github-watch.example.json` to `config/github-watch.json`.
-3. Copy `config/travel-watch.example.json` to `config/travel-watch.json`.
-4. Fill in your GitHub and travel API key values.
-5. Run `node start-agents.js`.
-6. Open `dashboard/index.html` in a browser.
+1. Install dependencies:
 
-## Travel Concierge Flow
+	 ```bash
+	 npm install
+	 ```
 
-The new travel agent runs continuously and follows this machine pipeline:
+2. Prepare config files:
 
-Dashboard Prompt -> ORACLE (intent parse) -> SENTINEL (flight scan) + WEATHER (forecast) + GUARDIAN (budget/safety) + OPTIMIZER (best value) -> Agent Negotiation Round -> Complete itinerary auto-booked (simulated) + shared in dashboard response.
+	 - Copy `config/github-watch.example.json` -> `config/github-watch.json`
+	 - Copy `config/travel-watch.example.json` -> `config/travel-watch.json`
+	 - Fill required tokens and host/port values
 
-Integrations in this flow:
+3. Start agents:
 
-- aviationstack API for live flight data.
-- OpenWeather API for forecast and risk estimation.
+	 ```bash
+	 npm start
+	 ```
 
-Auto-booking in v1 is intentionally simulated (no payment booking provider yet).
+4. Start dashboard server (new terminal):
 
-## How To Add A New Agent
+	 ```bash
+	 npm run dashboard
+	 ```
 
-1. Create a folder under `agents/`.
-2. Add your Node.js agent script in that folder.
-3. Register a new spawn entry in `start-agents.js` so it starts with the rest.
+5. Open dashboard:
 
-## File Structure
+	 - http://127.0.0.1:8080
 
-- `agents/github/`: GitHub watcher and researcher agent files.
-- `agents/email/`: Placeholder for email monitor agent soul/spec.
-- `config/`: Runtime config and example template.
-- `dashboard/`: Browser dashboard and runtime logs JSON.
-- `start-agents.js`: Main process launcher and log collector.
-- `package.json`: Project metadata and start script.
+## Runtime Notes
+
+- The launcher starts:
+	- `github-agent`
+	- `researcher-agent`
+	- `travel-agent` (if its port is not already in use)
+	- `orchestrator` via `openclaw gateway run` (if port 18789 is free)
+- Logs are persisted to `dashboard/logs.json`.
+- Press Ctrl+C in the launcher terminal to stop spawned processes.
+
+## API Endpoints (Dashboard Server)
+
+- `GET /api/dashboard/config`
+- `GET /api/github/repos`
+- `POST /api/github/repo/select`
+- `POST /api/openclaw/chat`
+- `POST /api/agents-council/run`
+
+Example council request:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/agents-council/run \
+	-H "Content-Type: application/json" \
+	-d '{"problem":"Critical bug in checkout flow causing duplicate charge risk"}'
+```
+
+## Troubleshooting
+
+- If `npm start` exits early:
+	- verify `openclaw` CLI is installed and runnable
+	- confirm required config JSON files exist and are valid
+- If dashboard cannot reach gateway:
+	- check `openclaw_base`, `openclaw_port`, and `openclaw_chat_paths` in `config/github-watch.json`
+- If GitHub repos are empty:
+	- verify `github_token` and token scopes
+
+## Repository Layout
+
+```text
+agents/      agent implementations and machine modules
+config/      runtime JSON config + examples
+dashboard/   static UI, API server, and logs
+start-agents.js  process launcher and log collector
+```
