@@ -14,9 +14,13 @@ function loadState() {
     if (!Array.isArray(parsed.seenIssues)) parsed.seenIssues = [];
     if (!Array.isArray(parsed.seenPRs)) parsed.seenPRs = [];
     if (!Array.isArray(parsed.seenCommits)) parsed.seenCommits = [];
+    if (!Array.isArray(parsed.reviewedPRs)) parsed.reviewedPRs = [];
+    if (!parsed.reviewedPRHeads || typeof parsed.reviewedPRHeads !== 'object') {
+      parsed.reviewedPRHeads = {};
+    }
     return parsed;
   } catch {
-    return { seenIssues: [], seenPRs: [], seenCommits: [] };
+    return { seenIssues: [], seenPRs: [], seenCommits: [], reviewedPRs: [], reviewedPRHeads: {} };
   }
 }
 
@@ -165,6 +169,50 @@ function addLabel(owner, repo, number, labels) {
   });
 }
 
+async function analyzePullRequestWithOpenClaw(owner, repoName, prNumber) {
+  const pr = await githubRequest(`/repos/${owner}/${repoName}/pulls/${prNumber}`);
+  const files = await githubRequest(`/repos/${owner}/${repoName}/pulls/${prNumber}/files`);
+  const maxFiles = Number(config.pr_review_max_files || 6);
+  const maxPatchChars = Number(config.pr_review_max_patch_chars || 2000);
+
+  const patchSummary = (Array.isArray(files) ? files : []).slice(0, maxFiles).map((file) => {
+    const patch = (file.patch || '').slice(0, maxPatchChars);
+    return `File: ${file.filename}\nStatus: ${file.status}\nPatch:\n${patch || '[no patch data]'}\n`;
+  }).join('\n');
+
+  const prompt = `
+PR REVIEW for ${owner}/${repoName}
+PR #${prNumber}: ${pr.title}
+Author: ${pr.user && pr.user.login}
+Base: ${pr.base && pr.base.ref} -> Head: ${pr.head && pr.head.ref}
+
+Diff summary:\n${patchSummary}
+
+Analyze the PR for bugs, risks, missing tests, and suggest fixes. Reply ONLY with JSON:
+{
+  "summary": "short summary",
+  "risks": ["risk1", "risk2"],
+  "suggested_fixes": ["fix1", "fix2"],
+  "tests": ["test1", "test2"]
+}
+`.trim();
+
+  const response = await askOpenClaw(prompt);
+  const text = response.text || response.message || JSON.stringify(response);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+  if (!jsonMatch) {
+    return {
+      summary: 'Unable to parse OpenClaw response.',
+      risks: [],
+      suggested_fixes: [],
+      tests: []
+    };
+  }
+
+  return JSON.parse(jsonMatch[0]);
+}
+
 function classifyIssue(title, body) {
   const text = (title + ' ' + (body || '')).toLowerCase();
   if (text.match(/bug|error|crash|fix|broken|fail/))
@@ -220,15 +268,43 @@ async function checkRepo(repo) {
   );
 
   for (const pr of prs) {
-    if (state.seenPRs.includes(pr.number)) continue;
+    const headSha = pr.head && pr.head.sha;
+    const isNewPr = !state.seenPRs.includes(pr.number);
+    const lastReviewedSha = state.reviewedPRHeads[String(pr.number)];
+    const hasNewCommit = headSha && headSha !== lastReviewedSha;
 
-    console.log(`  NEW PR #${pr.number}: ${pr.title}`);
-    await postComment(owner, repoName, pr.number,
-      `New PR: **${pr.title}**\nReview requested.\n\nPosted by OpenClaw Watcher.`
-    );
-    console.log(`  PR comment posted`);
+    if (!isNewPr && !hasNewCommit) {
+      continue;
+    }
 
-    state.seenPRs.push(pr.number);
+    if (isNewPr) {
+      console.log(`  NEW PR #${pr.number}: ${pr.title}`);
+      await postComment(owner, repoName, pr.number,
+        `New PR: **${pr.title}**\nReview requested.\n\nPosted by OpenClaw Watcher.`
+      );
+      console.log(`  PR comment posted`);
+    } else if (hasNewCommit) {
+      console.log(`  PR UPDATE #${pr.number}: new commit detected (${headSha.slice(0, 7)})`);
+    }
+
+    if (config.pr_review_enabled) {
+      try {
+        const review = await analyzePullRequestWithOpenClaw(owner, repoName, pr.number);
+        const body = `## OpenClaw PR Review\n\n**Summary**\n${review.summary || 'N/A'}\n\n**Risks**\n${(review.risks || []).map((r) => `- ${r}`).join('\n') || '- none'}\n\n**Suggested fixes**\n${(review.suggested_fixes || []).map((f) => `- ${f}`).join('\n') || '- none'}\n\n**Tests to consider**\n${(review.tests || []).map((t) => `- ${t}`).join('\n') || '- none'}\n\n**Head commit**\n${headSha || 'unknown'}\n\n---\nAutomated PR review via OpenClaw gateway.`;
+        await postComment(owner, repoName, pr.number, body);
+        console.log(`  PR review posted for #${pr.number}`);
+      } catch (err) {
+        console.log(`  PR review failed: ${err.message}`);
+      }
+
+      state.reviewedPRs.push(pr.number);
+      if (state.reviewedPRs.length > 200) {
+        state.reviewedPRs = state.reviewedPRs.slice(-200);
+      }
+    }
+
+    state.reviewedPRHeads[String(pr.number)] = headSha || lastReviewedSha || null;
+    if (isNewPr) state.seenPRs.push(pr.number);
     saveState(state);
   }
 

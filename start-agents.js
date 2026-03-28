@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 const LOGS_FILE = path.join(__dirname, 'dashboard', 'logs.json');
 const MAX_LOGS = 200;
@@ -150,39 +151,104 @@ function startAgent(name, command, args, options) {
   return child;
 }
 
-ensureLogsFile();
-console.log('Starting Autonomous Agent System...\n');
+function readTravelApiPort() {
+  try {
+    const travelConfigPath = path.join(__dirname, 'config', 'travel-watch.json');
+    const raw = fs.readFileSync(travelConfigPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const configured = Number(parsed.prompt_api_port || 18890);
+    return Number.isFinite(configured) ? configured : 18890;
+  } catch {
+    return 18890;
+  }
+}
 
-const watcher = startAgent(
-  'github-watcher',
-  'node',
-  ['agents/github/github-watcher.js'],
-  { cwd: __dirname }
-);
-console.log('GitHub Watcher started (Observe layer)');
+function isLocalPortListening(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    const finish = (result) => {
+      try { socket.destroy(); } catch {}
+      resolve(result);
+    };
 
-const travelConcierge = startAgent(
-  'travel-concierge',
-  'node',
-  ['agents/travel/travel-concierge.js'],
-  { cwd: __dirname }
-);
-console.log('Travel Concierge started (Plan layer)');
+    socket.setTimeout(800);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
 
-const gateway = startAgent(
-  'orchestrator',
-  'openclaw',
-  ['gateway', 'run'],
-  { cwd: __dirname, shell: true }
-);
-console.log('Orchestrator started (Decide layer)');
+async function bootstrap() {
+  ensureLogsFile();
+  console.log('Starting Autonomous Agent System...\n');
 
-process.on('SIGINT', () => {
-  console.log('\nShutting down all agents...');
-  watcher.kill();
-  travelConcierge.kill();
-  gateway.kill();
-  process.exit();
+  const watcher = startAgent(
+    'github-watcher',
+    'node',
+    ['agents/github/github-watcher.js'],
+    { cwd: __dirname }
+  );
+  console.log('GitHub Watcher started (Observe layer)');
+
+  const researcher = startAgent(
+    'researcher-agent',
+    'node',
+    ['agents/github/researcher-agent.js'],
+    { cwd: __dirname }
+  );
+  console.log('Researcher Agent started (Analyze layer)');
+
+  const travelPort = readTravelApiPort();
+  const travelAlreadyRunning = await isLocalPortListening(travelPort);
+
+  let travelConcierge = null;
+  if (travelAlreadyRunning) {
+    const now = new Date().toISOString();
+    upsertAgentStatus('travel-concierge', 'running', now);
+    appendLog('travel-concierge', `travel-concierge already running on 127.0.0.1:${travelPort}; startup skipped`);
+    console.log(`Travel Concierge already running on 127.0.0.1:${travelPort} (Plan layer reused)`);
+  } else {
+    travelConcierge = startAgent(
+      'travel-concierge',
+      'node',
+      ['agents/travel/travel-concierge.js'],
+      { cwd: __dirname }
+    );
+    console.log('Travel Concierge started (Plan layer)');
+  }
+
+  const gatewayPort = 18789;
+  const gatewayAlreadyRunning = await isLocalPortListening(gatewayPort);
+
+  let gateway = null;
+  if (gatewayAlreadyRunning) {
+    const now = new Date().toISOString();
+    upsertAgentStatus('orchestrator', 'running', now);
+    appendLog('orchestrator', `gateway already running on 127.0.0.1:${gatewayPort}; startup skipped`);
+    console.log(`Orchestrator already running on 127.0.0.1:${gatewayPort} (Decide layer reused)`);
+  } else {
+    gateway = startAgent(
+      'orchestrator',
+      'openclaw',
+      ['gateway', 'run'],
+      { cwd: __dirname, shell: true }
+    );
+    console.log('Orchestrator started (Decide layer)');
+  }
+
+  process.on('SIGINT', () => {
+    console.log('\nShutting down all agents...');
+    if (watcher) watcher.kill();
+    if (researcher) researcher.kill();
+    if (travelConcierge) travelConcierge.kill();
+    if (gateway) gateway.kill();
+    process.exit();
+  });
+
+  console.log('\nAll agents running. Press Ctrl+C to stop everything.\n');
+}
+
+bootstrap().catch((error) => {
+  console.error(`error startup failed: ${error.message}`);
+  process.exit(1);
 });
-
-console.log('\nAll agents running. Press Ctrl+C to stop everything.\n');

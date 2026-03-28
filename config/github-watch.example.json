@@ -10,6 +10,21 @@
     }
   ],
   "issue_research_enabled": true,
+  "pr_review_enabled": true,
+  "pr_review_max_files": 6,
+  "pr_review_max_patch_chars": 2000,
+  "openclaw_base": "127.0.0.1",
+  "openclaw_port": 18789,
+  "openclaw_ws_url": "ws://127.0.0.1:18789/",
+  "openclaw_ws_enabled": true,
+  "openclaw_session_key": "agent:main:main",
+  "openclaw_ws_timeout_ms": 20000,
+  "openclaw_ws_token": "YOUR_OPENCLAW_TOKEN_HERE",
+  "openclaw_chat_paths": [
+    "/api/chat",
+    "/chat",
+    "/api/v1/chat"
+  ],
   "commit_review_enabled": true,
   "commit_review_per_page": 5,
   "commit_review_max_files": 5,
