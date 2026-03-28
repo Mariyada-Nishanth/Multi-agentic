@@ -3,10 +3,49 @@ const https = require('https');
 const path = require('path');
 const { researchAndComment, askOpenClaw } = require('./openclaw-researcher');
 
-const config = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../config/github-watch.json'), 'utf8')
-);
+const CONFIG_PATH = path.join(__dirname, '../../config/github-watch.json');
+function loadWatcherConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (err) {
+    console.error(`error failed to load github-watch config: ${err.message}`);
+    return { repos: [] };
+  }
+}
+
+let config = loadWatcherConfig();
 const STATE_FILE = './watcher-state.json';
+function getGithubRequestTimeoutMs() {
+  return Number(config.github_request_timeout_ms || 15000);
+}
+
+function getGithubRequestRetries() {
+  return Number(config.github_request_retries || 2);
+}
+
+function normalizeErrorMessage(err) {
+  if (!err) return 'Unknown error';
+  if (typeof err === 'string') {
+    const msg = err.trim();
+    return msg || 'Unknown error';
+  }
+  if (err instanceof Error) {
+    const msg = String(err.message || '').trim();
+    if (msg) return msg;
+    return String(err.name || 'Error');
+  }
+  try {
+    const json = JSON.stringify(err);
+    if (json && json !== '{}') return json;
+  } catch {
+  }
+  return String(err);
+}
+
+function shouldRetryGithubError(err) {
+  const code = String(err && err.code || '').toUpperCase();
+  return ['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(code);
+}
 
 function loadState() {
   try {
@@ -28,48 +67,91 @@ function saveState(state) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
-function githubRequest(path) {
+function githubRequest(path, options = {}) {
+  const method = options.method || 'GET';
+  const bodyData = options.body ? JSON.stringify(options.body) : null;
+
   return new Promise((resolve, reject) => {
-    const options = {
+    const requestOptions = {
       hostname: 'api.github.com',
       path,
+      method,
       headers: {
         'Authorization': `Bearer ${config.github_token}`,
         'User-Agent': 'openclaw-watcher',
         'Accept': 'application/vnd.github.v3+json'
       }
     };
-    https.get(options, (res) => {
+
+    if (bodyData) {
+      requestOptions.headers['Content-Type'] = 'application/json';
+      requestOptions.headers['Content-Length'] = Buffer.byteLength(bodyData);
+    }
+
+    const req = https.request(requestOptions, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(JSON.parse(data)));
-    }).on('error', reject);
+      res.on('end', () => {
+        let parsed = {};
+        try {
+          parsed = data ? JSON.parse(data) : {};
+        } catch (err) {
+          reject(new Error(`GitHub response parse failed for ${method} ${path}: ${err.message}`));
+          return;
+        }
+
+        if ((res.statusCode || 0) >= 400) {
+          const apiMessage = parsed && (parsed.message || parsed.error);
+          const msg = apiMessage
+            ? `GitHub API ${res.statusCode} ${method} ${path}: ${apiMessage}`
+            : `GitHub API ${res.statusCode} ${method} ${path}`;
+          const error = new Error(msg);
+          error.code = `HTTP_${res.statusCode}`;
+          reject(error);
+          return;
+        }
+
+        resolve(parsed);
+      });
+    });
+
+    const timeoutMs = getGithubRequestTimeoutMs();
+    req.setTimeout(timeoutMs, () => {
+      const timeoutErr = new Error(`GitHub request timed out after ${timeoutMs}ms for ${method} ${path}`);
+      timeoutErr.code = 'ETIMEDOUT';
+      req.destroy(timeoutErr);
+    });
+
+    req.on('error', reject);
+    if (bodyData) req.write(bodyData);
+    req.end();
   });
 }
 
+async function githubRequestWithRetry(path, options = {}) {
+  let lastError = null;
+  const retries = getGithubRequestRetries();
+
+  for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+    try {
+      return await githubRequest(path, options);
+    } catch (err) {
+      lastError = err;
+      const canRetry = shouldRetryGithubError(err) && attempt <= retries;
+      if (!canRetry) break;
+      const waitMs = attempt * 1000;
+      console.log(`  GitHub request retry ${attempt}/${retries} after ${waitMs}ms: ${normalizeErrorMessage(err)}`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  throw lastError;
+}
+
 function postCommitComment(owner, repo, sha, body) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ body });
-    const options = {
-      hostname: 'api.github.com',
-      path: `/repos/${owner}/${repo}/commits/${sha}/comments`,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.github_token}`,
-        'User-Agent': 'openclaw-watcher',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      }
-    };
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => resolve(JSON.parse(body)));
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+  return githubRequestWithRetry(`/repos/${owner}/${repo}/commits/${sha}/comments`, {
+    method: 'POST',
+    body: { body }
   });
 }
 
@@ -118,54 +200,16 @@ Reply ONLY with JSON:
 }
 
 function postComment(owner, repo, number, body) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ body });
-    const options = {
-      hostname: 'api.github.com',
-      path: `/repos/${owner}/${repo}/issues/${number}/comments`,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.github_token}`,
-        'User-Agent': 'openclaw-watcher',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      }
-    };
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => resolve(JSON.parse(body)));
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+  return githubRequestWithRetry(`/repos/${owner}/${repo}/issues/${number}/comments`, {
+    method: 'POST',
+    body: { body }
   });
 }
 
 function addLabel(owner, repo, number, labels) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ labels });
-    const options = {
-      hostname: 'api.github.com',
-      path: `/repos/${owner}/${repo}/issues/${number}/labels`,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.github_token}`,
-        'User-Agent': 'openclaw-watcher',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      }
-    };
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', c => body += c);
-      res.on('end', () => resolve(JSON.parse(body)));
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+  return githubRequestWithRetry(`/repos/${owner}/${repo}/issues/${number}/labels`, {
+    method: 'POST',
+    body: { labels }
   });
 }
 
@@ -229,7 +273,7 @@ async function checkRepo(repo) {
   const { owner, repo: repoName } = repo;
   console.log(`\n[${new Date().toISOString()}] Checking ${owner}/${repoName}...`);
 
-  const issues = await githubRequest(
+  const issues = await githubRequestWithRetry(
     `/repos/${owner}/${repoName}/issues?state=open&sort=created&direction=desc`
   );
 
@@ -263,7 +307,7 @@ async function checkRepo(repo) {
     saveState(state);
   }
 
-  const prs = await githubRequest(
+  const prs = await githubRequestWithRetry(
     `/repos/${owner}/${repoName}/pulls?state=open&sort=created&direction=desc`
   );
 
@@ -309,7 +353,7 @@ async function checkRepo(repo) {
   }
 
   if (config.commit_review_enabled) {
-    const commits = await githubRequest(
+    const commits = await githubRequestWithRetry(
       `/repos/${owner}/${repoName}/commits?per_page=${Number(config.commit_review_per_page || 5)}`
     );
 
@@ -323,7 +367,7 @@ async function checkRepo(repo) {
         await postCommitComment(owner, repoName, commit.sha, body);
         console.log(`  Commit review posted for ${commit.sha.slice(0, 7)}`);
       } catch (err) {
-        console.log(`  Commit review failed: ${err.message}`);
+        console.log(`  Commit review failed: ${normalizeErrorMessage(err)}`);
       }
 
       state.seenCommits.push(commit.sha);
@@ -338,15 +382,55 @@ async function checkRepo(repo) {
 }
 
 async function run() {
-  for (const repo of config.repos) {
+  config = loadWatcherConfig();
+  const repos = Array.isArray(config.repos) ? config.repos : [];
+  if (!repos.length) {
+    console.log('warn no repos configured in github-watch.json');
+    return;
+  }
+
+  for (const repo of repos) {
     try {
       await checkRepo(repo);
     } catch (e) {
-      console.error(`Error checking repo:`, e.message);
+      const reason = normalizeErrorMessage(e);
+      console.error(`Error checking repo: ${reason}`);
+      if (/ENOTFOUND|EAI_AGAIN/i.test(reason)) {
+        console.error('Hint: DNS lookup failed for api.github.com. Check internet/DNS and try again.');
+      }
     }
   }
 }
 
-run();
-setInterval(run, 5 * 60 * 1000);
-console.log('GitHub Watcher started - checking every 5 minutes');
+let runInProgress = false;
+let runQueued = false;
+
+async function runSafely() {
+  if (runInProgress) {
+    runQueued = true;
+    return;
+  }
+
+  runInProgress = true;
+  try {
+    await run();
+  } finally {
+    runInProgress = false;
+    if (runQueued) {
+      runQueued = false;
+      setTimeout(runSafely, 0);
+    }
+  }
+}
+
+fs.watchFile(CONFIG_PATH, { interval: 1500 }, () => {
+  console.log('info github-watch config changed, triggering immediate check');
+  runSafely().catch((err) => {
+    console.error(`Error checking repo: ${normalizeErrorMessage(err)}`);
+  });
+});
+
+runSafely();
+const pollMs = Number(config.github_poll_interval_ms || 5 * 60 * 1000);
+setInterval(runSafely, pollMs);
+console.log(`GitHub Watcher started - checking every ${Math.round(pollMs / 1000)} seconds`);

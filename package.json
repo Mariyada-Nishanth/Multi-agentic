@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Autonomous AI agents powered by OpenClaw + Groq",
   "scripts": {
-    "start": "node start-agents.js"
+    "start": "node start-agents.js",
+    "dashboard": "node dashboard/server.js"
   },
   "engines": { "node": ">=18" }
 }

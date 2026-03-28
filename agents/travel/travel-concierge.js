@@ -64,6 +64,25 @@ function formatDateTime(isoText) {
   });
 }
 
+function normalizeErrorMessage(err) {
+  if (!err) return 'Unknown error';
+  if (err instanceof Error) {
+    const msg = String(err.message || '').trim();
+    if (msg) return msg;
+    return String(err.name || 'Error');
+  }
+  if (typeof err === 'string') {
+    const msg = err.trim();
+    return msg || 'Unknown error';
+  }
+  try {
+    const json = JSON.stringify(err);
+    if (json && json !== '{}') return json;
+  } catch {
+  }
+  return String(err);
+}
+
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -204,22 +223,52 @@ async function processPrompt(config, promptJob) {
   const intent = interpretIntent(text, defaults);
   console.log(`success ORACLE interprets intent destination=${intent.destination} budget=${intent.budgetInr}`);
 
-  const sentinelResult = await scanFlights(intent, config);
+  let sentinelResult;
+  try {
+    sentinelResult = await scanFlights(intent, config);
+  } catch (err) {
+    throw new Error(`SENTINEL failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log(`success SENTINEL scans flights count=${sentinelResult.flights.length}`);
 
-  const weatherResult = await checkForecast(intent, config);
+  let weatherResult;
+  try {
+    weatherResult = await checkForecast(intent, config);
+  } catch (err) {
+    throw new Error(`WEATHER failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log(`success WEATHER forecast check ${weatherResult.summary}`);
 
-  const guardianResult = checkSafetyAndBudget(intent, sentinelResult, weatherResult, config);
+  let guardianResult;
+  try {
+    guardianResult = checkSafetyAndBudget(intent, sentinelResult, weatherResult, config);
+  } catch (err) {
+    throw new Error(`GUARDIAN failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log(`warn GUARDIAN checks budget safeToProceed=${guardianResult.safeToProceed}`);
 
-  const optimizerResult = pickBestValue(intent, sentinelResult, config);
+  let optimizerResult;
+  try {
+    optimizerResult = pickBestValue(intent, sentinelResult, config);
+  } catch (err) {
+    throw new Error(`OPTIMIZER failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log(`success OPTIMIZER picks options flights=${optimizerResult.rankedFlights.length}`);
 
-  const plan = negotiatePlan(intent, optimizerResult, guardianResult, weatherResult, config);
+  let plan;
+  try {
+    plan = negotiatePlan(intent, optimizerResult, guardianResult, weatherResult, config);
+  } catch (err) {
+    throw new Error(`NEGOTIATOR failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log('info Agent negotiation round complete');
 
-  const completion = completeAndShare(plan, intent);
+  let completion;
+  try {
+    completion = completeAndShare(plan, intent);
+  } catch (err) {
+    throw new Error(`COMPLETION failed: ${normalizeErrorMessage(err)}`);
+  }
   console.log(`success Complete itinerary auto-booked and shared booking=${completion.booking.bookingId}`);
 
   const reply = formatReply(intent, guardianResult, weatherResult, plan, completion);
@@ -247,13 +296,14 @@ async function processQueue(config, state) {
       state.processedPromptIds = state.processedPromptIds.slice(-1000);
     }
   } catch (err) {
-    console.error(`error trigger execution failed: ${err.message}`);
+    const message = normalizeErrorMessage(err);
+    console.error(`error trigger execution failed: ${message}`);
     lastRun = {
       id: next.id,
       prompt: next.prompt,
       status: 'failed',
       completedAt: new Date().toISOString(),
-      output: err.message
+      output: message
     };
     writeJson(RESPONSE_FILE, lastRun);
   }

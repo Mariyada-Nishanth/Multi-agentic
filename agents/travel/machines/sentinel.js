@@ -27,6 +27,52 @@ function estimateFareInr(flight, baseFareInr, volatilityFactor) {
   return Math.round(baseFareInr * multiplier * randomizer * volatilityFactor);
 }
 
+function parseDateOnly(dateText) {
+  if (!dateText || !/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return null;
+  const [y, m, d] = dateText.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function isoFromDateAndTime(dateUtc, sourceIso, defaultHour, defaultMinute) {
+  if (!(dateUtc instanceof Date)) return sourceIso || null;
+
+  const parsed = sourceIso ? new Date(sourceIso) : null;
+  const useParsed = parsed instanceof Date && !Number.isNaN(parsed.getTime());
+  const hour = useParsed ? parsed.getUTCHours() : defaultHour;
+  const minute = useParsed ? parsed.getUTCMinutes() : defaultMinute;
+
+  const merged = new Date(Date.UTC(
+    dateUtc.getUTCFullYear(),
+    dateUtc.getUTCMonth(),
+    dateUtc.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0
+  ));
+
+  return merged.toISOString();
+}
+
+function alignFlightToIntentDates(intent, departureIso, arrivalIso) {
+  const startDate = parseDateOnly(intent && intent.travelDates && intent.travelDates.from);
+  if (!startDate) {
+    return { departureTime: departureIso || null, arrivalTime: arrivalIso || null };
+  }
+
+  const alignedDeparture = isoFromDateAndTime(startDate, departureIso, 9, 0);
+  let alignedArrival = isoFromDateAndTime(startDate, arrivalIso, 10, 30);
+
+  const dep = alignedDeparture ? new Date(alignedDeparture) : null;
+  const arr = alignedArrival ? new Date(alignedArrival) : null;
+  if (dep && arr && !Number.isNaN(dep.getTime()) && !Number.isNaN(arr.getTime()) && arr <= dep) {
+    alignedArrival = new Date(dep.getTime() + (90 * 60 * 1000)).toISOString();
+  }
+
+  return { departureTime: alignedDeparture, arrivalTime: alignedArrival };
+}
+
 async function scanFlights(intent, config) {
   if (!config.aviationstack_api_key) {
     throw new Error('Missing aviationstack_api_key in travel config');
@@ -62,12 +108,17 @@ async function scanFlights(intent, config) {
       config.assumed_base_fare_inr || 7000,
       config.price_volatility_factor || 1
     );
+    const aligned = alignFlightToIntentDates(
+      intent,
+      flight.departure && flight.departure.scheduled || null,
+      flight.arrival && flight.arrival.scheduled || null
+    );
 
     return {
       airline: (flight.airline && flight.airline.name) || 'Unknown Airline',
       flightCode: `${flight.flight && flight.flight.iata || ''}`.trim() || 'N/A',
-      departureTime: flight.departure && flight.departure.scheduled || null,
-      arrivalTime: flight.arrival && flight.arrival.scheduled || null,
+      departureTime: aligned.departureTime,
+      arrivalTime: aligned.arrivalTime,
       status: flight.flight_status || 'unknown',
       estimatedFareInr: fareInr
     };

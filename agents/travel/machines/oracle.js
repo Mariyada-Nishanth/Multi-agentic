@@ -2,6 +2,9 @@ function extractBudget(text, fallbackBudgetInr) {
   const underMatch = text.match(/(?:under|below|within)\s*(?:rs\.?|inr)?\s*(\d{3,7})/i);
   if (underMatch) return Number(underMatch[1]);
 
+  const forCurrencyMatch = text.match(/for\s*(?:rs\.?|inr|₹)?\s*(\d{3,7})\s*(?:rupees|inr|rs\.?)\b/i);
+  if (forCurrencyMatch) return Number(forCurrencyMatch[1]);
+
   const budgetMatch = text.match(/budget\s*(?:is|=|:)?\s*(?:rs\.?|inr)?\s*(\d{3,7})/i);
   if (budgetMatch) return Number(budgetMatch[1]);
 
@@ -9,7 +12,11 @@ function extractBudget(text, fallbackBudgetInr) {
 }
 
 function extractGroupSize(text, fallbackGroupSize) {
-  const forMatch = text.match(/for\s*(\d{1,2})\s*(?:people|persons|travellers|travelers)?/i);
+  const explicitPeopleMatch = text.match(/for\s*(\d{1,2})\b\s*(?:people|persons|travellers|travelers|adults|pax|members)\b/i);
+  if (explicitPeopleMatch) return Number(explicitPeopleMatch[1]);
+
+  // Accept shorthand like "for 3 under 45000" but avoid parsing money amounts such as "for 45000 rupees".
+  const forMatch = text.match(/for\s*(\d{1,2})\b\s*(?:under|below|within|on|with)?\b/i);
   if (forMatch) return Number(forMatch[1]);
 
   const groupMatch = text.match(/group\s*(?:of)?\s*(\d{1,2})/i);
@@ -19,17 +26,22 @@ function extractGroupSize(text, fallbackGroupSize) {
 }
 
 function extractDestination(text, fallbackDestination) {
+  const normalizeDestination = (value) => String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^(?:a|an|the)\s+/i, '');
+
   const planTripMatch = text.match(/plan\s+([a-z\s]+?)\s+trip/i);
   if (planTripMatch) {
-    return planTripMatch[1].trim().replace(/\s+/g, ' ');
+    return normalizeDestination(planTripMatch[1]);
   }
 
   const toMatch = text.match(/trip\s+to\s+([a-z\s]+)/i);
   if (toMatch) {
-    return toMatch[1].trim().replace(/\s+/g, ' ');
+    return normalizeDestination(toMatch[1]);
   }
 
-  return fallbackDestination;
+  return normalizeDestination(fallbackDestination);
 }
 
 function extractDates(text) {
@@ -87,7 +99,7 @@ function interpretIntent(messageText, defaults) {
   const text = (messageText || '').trim();
   const destination = extractDestination(text, defaults.default_destination || 'goa');
   const budgetInr = extractBudget(text, defaults.default_budget_inr || 35000);
-  const groupSize = extractGroupSize(text, defaults.default_group_size || 2);
+  const groupSize = extractGroupSize(text, defaults.default_group_size || 1);
   const travelDates = extractDates(text);
   const preferences = extractPreferences(text, defaults.default_preferences || ['budget']);
 

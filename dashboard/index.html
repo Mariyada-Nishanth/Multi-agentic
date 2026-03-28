@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenClaw Central Ops</title>
+  <title>Central Ops</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -20,6 +20,9 @@
       --warn: #f0b429;
       --success: #2ecc8a;
       --info: #2a3444;
+      --left-col-width: 300px;
+      --right-col-width: 360px;
+      --left-top-height: 210px;
     }
 
     * { box-sizing: border-box; }
@@ -91,6 +94,28 @@
       white-space: nowrap;
     }
 
+    .repo-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .repo-select {
+      min-width: 260px;
+      max-width: 360px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .repo-input {
+      min-width: 220px;
+      max-width: 320px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
     .meta {
       display: flex;
       align-items: center;
@@ -124,12 +149,19 @@
 
     .quickbar {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: minmax(260px, 1.5fr) auto minmax(180px, 1fr) minmax(200px, 1.2fr) auto auto;
       gap: 8px;
       padding: 10px 20px;
       border-bottom: 1px solid var(--line);
       background: rgba(11, 15, 21, 0.95);
       align-items: center;
+    }
+
+    .chat-status {
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .search {
@@ -190,8 +222,8 @@
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(260px, 300px) 1fr minmax(320px, 370px);
-      gap: 12px;
+      grid-template-columns: minmax(220px, var(--left-col-width)) 10px minmax(420px, 1fr) 10px minmax(280px, var(--right-col-width));
+      gap: 0;
       padding: 12px;
       min-height: 0;
       overflow: hidden;
@@ -221,9 +253,57 @@
     .left-stack,
     .right-stack {
       display: grid;
-      grid-template-rows: auto 1fr;
-      gap: 12px;
       min-height: 0;
+    }
+
+    .left-stack {
+      grid-template-rows: minmax(130px, var(--left-top-height)) 10px minmax(210px, 1fr);
+      padding-right: 6px;
+    }
+
+    .right-stack {
+      grid-template-rows: 1fr;
+      padding-left: 6px;
+    }
+
+    .center-panel {
+      margin: 0 6px;
+    }
+
+    .resizer {
+      position: relative;
+      z-index: 5;
+      border-radius: 8px;
+      background: rgba(20, 28, 40, 0.8);
+      border: 1px solid #2b3749;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .resizer:hover {
+      border-color: #4d6483;
+      background: rgba(30, 42, 59, 0.92);
+    }
+
+    .resizer.active {
+      border-color: #e05a1e;
+      background: rgba(224, 90, 30, 0.2);
+    }
+
+    .resizer-col {
+      cursor: col-resize;
+      align-self: stretch;
+      justify-self: center;
+      width: 10px;
+    }
+
+    .resizer-row {
+      cursor: row-resize;
+      width: 100%;
+      height: 10px;
+    }
+
+    body.is-resizing {
+      user-select: none;
     }
 
     .kpi-grid {
@@ -528,18 +608,32 @@
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: auto minmax(320px, 1fr) auto;
+        gap: 12px;
         overflow: auto;
       }
 
       .left-stack,
       .right-stack {
         grid-template-rows: auto;
+        padding: 0;
+      }
+
+      .center-panel {
+        margin: 0;
+      }
+
+      .resizer {
+        display: none;
       }
     }
 
     @media (max-width: 860px) {
       .quickbar {
         grid-template-columns: 1fr;
+      }
+
+      .chat-status {
+        white-space: normal;
       }
 
       .topbar {
@@ -553,8 +647,13 @@
   <div class="shell">
     <header class="topbar">
       <div class="title-wrap">
-        <div class="title">🦞 OpenClaw Central Ops</div>
-        <div class="repo-badge">Mariyada-Nishanth/Multi-agentic</div>
+        <div class="title">🦞 Central Ops</div>
+        <div class="repo-control">
+          <select id="repoSelect" class="select repo-select"></select>
+          <input id="repoInput" class="input repo-input" type="text" placeholder="owner/repo" />
+          <button id="repoSwitchBtn" class="btn">Switch Repo</button>
+          <span id="repoStatus" class="repo-badge">Repo monitor ready</span>
+        </div>
       </div>
       <div class="meta">
         <div class="live"><span class="live-dot"></span>LIVE</div>
@@ -563,6 +662,9 @@
     </header>
 
     <section class="quickbar">
+      <input id="globalChatInput" class="search" type="text" placeholder="Global chat: ask OpenClaw anything..." />
+      <button id="globalChatSendBtn" class="btn primary">Send</button>
+      <span id="globalChatStatus" class="muted chat-status">Global chat ready.</span>
       <input id="searchInput" class="search" type="text" placeholder="Search logs by text or keyword..." />
       <button id="refreshNowBtn" class="btn">Refresh Now</button>
       <button id="autoRefreshBtn" class="btn primary">Auto Refresh: ON</button>
@@ -577,16 +679,22 @@
           <div class="kpi-grid" id="kpiGrid"></div>
         </section>
 
+        <div class="resizer resizer-row" id="resizerLeftStack" aria-label="Resize left panels" role="separator"></div>
+
         <section class="panel">
           <h3>Agent Registry</h3>
           <div class="agent-list" id="agentList"></div>
         </section>
       </div>
 
-      <section class="panel">
+      <div class="resizer resizer-col" id="resizerLeftCol" aria-label="Resize left column" role="separator"></div>
+
+      <section class="panel center-panel">
         <h3>Central Activity Feed</h3>
         <div class="log-feed" id="logFeed"></div>
       </section>
+
+      <div class="resizer resizer-col" id="resizerRightCol" aria-label="Resize right column" role="separator"></div>
 
       <div class="right-stack">
         <section class="panel">
@@ -630,8 +738,10 @@
   <script>
     const filters = ['all', 'info', 'success', 'warn', 'error'];
     const agentCommandEndpoints = {
-      'travel-concierge': 'http://127.0.0.1:18890'
+      'travel-agent': 'http://127.0.0.1:18890'
     };
+    const layoutStorageKey = 'openclaw-dashboard-layout-v1';
+    const chatTokenStorageKey = 'openclaw-http-token';
 
     let currentFilter = 'all';
     let selectedAgentFilter = 'all';
@@ -649,6 +759,13 @@
     const logFeed = document.getElementById('logFeed');
     const uptime = document.getElementById('uptime');
     const searchInput = document.getElementById('searchInput');
+    const globalChatInput = document.getElementById('globalChatInput');
+    const globalChatSendBtn = document.getElementById('globalChatSendBtn');
+    const globalChatStatus = document.getElementById('globalChatStatus');
+    const repoSelect = document.getElementById('repoSelect');
+    const repoInput = document.getElementById('repoInput');
+    const repoSwitchBtn = document.getElementById('repoSwitchBtn');
+    const repoStatus = document.getElementById('repoStatus');
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     const autoRefreshBtn = document.getElementById('autoRefreshBtn');
     const targetAgent = document.getElementById('targetAgent');
@@ -659,6 +776,29 @@
     const healthStatus = document.getElementById('healthStatus');
     const githubPulse = document.getElementById('githubPulse');
     const lastOutput = document.getElementById('lastOutput');
+    const layoutEl = document.querySelector('.layout');
+    const leftStackEl = document.querySelector('.left-stack');
+    const resizerLeftCol = document.getElementById('resizerLeftCol');
+    const resizerRightCol = document.getElementById('resizerRightCol');
+    const resizerLeftStack = document.getElementById('resizerLeftStack');
+
+    const layoutSize = {
+      leftCol: 300,
+      rightCol: 360,
+      leftTop: 210
+    };
+
+    const openclawRuntime = {
+      base: '127.0.0.1',
+      port: 18789,
+      model: 'openclaw',
+      chatPaths: ['/v1/chat/completions', '/api/v1/chat', '/api/chat', '/chat'],
+      token: '',
+      proxyPath: '/api/openclaw/chat',
+      configPath: '/api/dashboard/config'
+    };
+
+    let selectedRepoName = '';
 
     function secondsToClock(totalSeconds) {
       const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
@@ -800,6 +940,317 @@
       }
     }
 
+    function appendLocalLog(agent, level, message) {
+      const entry = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        time: new Date().toISOString(),
+        agent,
+        level,
+        message
+      };
+      state.logs = Array.isArray(state.logs) ? [...state.logs, entry] : [entry];
+      renderKpis();
+      renderLogs();
+    }
+
+    function repoToName(repo) {
+      if (!repo || typeof repo !== 'object') return '';
+      if (typeof repo.fullName === 'string' && repo.fullName.trim()) return repo.fullName.trim();
+      const owner = String(repo.owner || '').trim();
+      const name = String(repo.repo || '').trim();
+      return owner && name ? `${owner}/${name}` : '';
+    }
+
+    async function loadRepoSelector() {
+      try {
+        const res = await fetch('/api/github/repos', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const repos = Array.isArray(data.repos) ? data.repos : [];
+        const activeName = repoToName(data.activeRepo);
+
+        repoSelect.innerHTML = '';
+        if (!repos.length) {
+          repoSelect.innerHTML = '<option value="">No repos configured</option>';
+          repoSelect.disabled = true;
+          repoStatus.textContent = 'No repos configured';
+          return;
+        }
+
+        for (const repo of repos) {
+          const fullName = repoToName(repo);
+          if (!fullName) continue;
+          const option = document.createElement('option');
+          option.value = fullName;
+          option.textContent = fullName;
+          repoSelect.appendChild(option);
+        }
+
+        repoSelect.disabled = false;
+        repoSelect.value = activeName && Array.from(repoSelect.options).some((o) => o.value === activeName)
+          ? activeName
+          : repoSelect.options[0].value;
+        selectedRepoName = repoSelect.value;
+        repoInput.value = selectedRepoName;
+        repoStatus.textContent = `Monitoring ${selectedRepoName}`;
+      } catch (err) {
+        repoSelect.innerHTML = '<option value="">Repo API unavailable</option>';
+        repoSelect.disabled = true;
+        repoStatus.textContent = `Repo load failed: ${err.message}`;
+      }
+    }
+
+    async function applySelectedRepo(repoName) {
+      const nextRepo = String(repoName || '').trim();
+      if (!nextRepo || nextRepo === selectedRepoName) return;
+
+      repoSelect.disabled = true;
+      repoSwitchBtn.disabled = true;
+      repoStatus.textContent = `Switching to ${nextRepo}...`;
+
+      try {
+        const res = await fetch('/api/github/repo/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: nextRepo })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        selectedRepoName = repoToName(data.activeRepo) || nextRepo;
+        if (!Array.from(repoSelect.options).some((o) => o.value === selectedRepoName)) {
+          const option = document.createElement('option');
+          option.value = selectedRepoName;
+          option.textContent = selectedRepoName;
+          repoSelect.appendChild(option);
+        }
+        repoSelect.value = selectedRepoName;
+        repoInput.value = selectedRepoName;
+        repoStatus.textContent = `Monitoring ${selectedRepoName}`;
+        appendLocalLog('github-agent', 'info', `Switched monitor repo to ${selectedRepoName}; watcher will check immediately.`);
+      } catch (err) {
+        repoStatus.textContent = `Repo switch failed: ${err.message}`;
+      } finally {
+        repoSelect.disabled = false;
+        repoSwitchBtn.disabled = false;
+      }
+    }
+
+    function applyRepoFromDropdown() {
+      applySelectedRepo(repoSelect.value);
+    }
+
+    function applyRepoFromInput() {
+      applySelectedRepo(repoInput.value);
+    }
+
+    function extractChatResponse(data) {
+      if (!data || typeof data !== 'object') return '';
+      if (typeof data.reply === 'string') return data.reply;
+      if (typeof data.response === 'string') return data.response;
+      if (typeof data.text === 'string') return data.text;
+      if (typeof data.output === 'string') return data.output;
+      if (typeof data.message === 'string') return data.message;
+      if (typeof data.content === 'string') return data.content;
+
+      const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+      if (choice && choice.message && typeof choice.message.content === 'string') return choice.message.content;
+      if (choice && typeof choice.text === 'string') return choice.text;
+
+      return '';
+    }
+
+    function getOpenClawBaseUrl() {
+      return `http://${openclawRuntime.base}:${openclawRuntime.port}`;
+    }
+
+    function getOpenClawHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = String(openclawRuntime.token || '').trim();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      return headers;
+    }
+
+    function buildGlobalChatPayload(path, message) {
+      if (path === '/v1/chat/completions') {
+        return {
+          model: openclawRuntime.model || 'openclaw',
+          messages: [{ role: 'user', content: message }]
+        };
+      }
+
+      return {
+        message,
+        session: 'dashboard',
+        agent: 'main'
+      };
+    }
+
+    async function loadOpenClawRuntimeConfig() {
+      let token = '';
+      try {
+        token = String(localStorage.getItem(chatTokenStorageKey) || '').trim();
+      } catch (_err) {
+      }
+
+      if (!token) {
+        try {
+          const params = new URLSearchParams(window.location.search || '');
+          token = String(
+            params.get('token')
+            || params.get('openclaw_token')
+            || params.get('openclaw_http_token')
+            || params.get('openclaw_ws_token')
+            || ''
+          ).trim();
+        } catch (_err) {
+        }
+      }
+
+      let loadedConfig = null;
+      try {
+        const res = await fetch(openclawRuntime.configPath, { cache: 'no-store' });
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg && typeof cfg === 'object') {
+            loadedConfig = cfg;
+          }
+        }
+      } catch (_err) {
+      }
+
+      if (!loadedConfig && window.OPENCLAW_CONFIG && typeof window.OPENCLAW_CONFIG === 'object') {
+        loadedConfig = window.OPENCLAW_CONFIG;
+      }
+
+      try {
+        const cfg = loadedConfig;
+        if (!cfg || typeof cfg !== 'object') {
+          openclawRuntime.token = token;
+          return;
+        }
+
+        if (typeof cfg.openclaw_base === 'string' && cfg.openclaw_base.trim()) {
+          openclawRuntime.base = cfg.openclaw_base.trim();
+        }
+        if (Number.isFinite(Number(cfg.openclaw_port))) {
+          openclawRuntime.port = Number(cfg.openclaw_port);
+        }
+        if (typeof cfg.openclaw_model === 'string' && cfg.openclaw_model.trim()) {
+          openclawRuntime.model = cfg.openclaw_model.trim();
+        }
+        if (Array.isArray(cfg.openclaw_chat_paths) && cfg.openclaw_chat_paths.length) {
+          openclawRuntime.chatPaths = cfg.openclaw_chat_paths
+            .map((entry) => String(entry || '').trim())
+            .filter((entry) => entry.startsWith('/'));
+        }
+
+        const configToken = String(cfg.openclaw_http_token || cfg.openclaw_ws_token || '').trim();
+        openclawRuntime.token = token || configToken;
+        if (openclawRuntime.token) {
+          try {
+            localStorage.setItem(chatTokenStorageKey, openclawRuntime.token);
+          } catch (_err) {
+          }
+        }
+      } catch (_err) {
+        openclawRuntime.token = token;
+      }
+    }
+
+    async function sendGlobalChat() {
+      const message = String(globalChatInput.value || '').trim();
+      if (!message) {
+        globalChatStatus.textContent = 'Type a message first.';
+        return;
+      }
+
+      const endpoints = Array.isArray(openclawRuntime.chatPaths) && openclawRuntime.chatPaths.length
+        ? openclawRuntime.chatPaths
+        : ['/v1/chat/completions', '/api/v1/chat', '/api/chat', '/chat'];
+      const base = getOpenClawBaseUrl();
+
+      globalChatSendBtn.disabled = true;
+      globalChatStatus.textContent = 'Sending...';
+      appendLocalLog('global-chat', 'info', `You: ${message}`);
+
+      try {
+        // First try same-origin proxy to avoid browser CORS restrictions.
+        try {
+          const proxyRes = await fetch(openclawRuntime.proxyPath, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message,
+              session: 'dashboard',
+              agent: 'main'
+            })
+          });
+
+          if (proxyRes.ok) {
+            const proxyData = await proxyRes.json().catch(() => ({}));
+            const proxyReply = extractChatResponse(proxyData) || String(proxyData.raw || '').trim() || 'Message accepted by gateway.';
+            const via = proxyData.via || 'proxy';
+            globalChatStatus.textContent = `Sent via ${via}`;
+            appendLocalLog('openclaw', 'success', proxyReply);
+            globalChatInput.value = '';
+            return;
+          }
+        } catch (_proxyErr) {
+        }
+
+        let lastError = null;
+        for (const path of endpoints) {
+          try {
+            const payload = buildGlobalChatPayload(path, message);
+            const res = await fetch(`${base}${path}`, {
+              method: 'POST',
+              headers: getOpenClawHeaders(),
+              body: JSON.stringify(payload)
+            });
+
+            if (res.status === 404 || res.status === 405) {
+              lastError = new Error(`${path} -> HTTP ${res.status}`);
+              continue;
+            }
+
+            if (!res.ok) {
+              lastError = new Error(`${path} -> HTTP ${res.status}`);
+              continue;
+            }
+
+            const raw = await res.text();
+            let data = {};
+            try {
+              data = raw ? JSON.parse(raw) : {};
+            } catch (_parseErr) {
+              data = {};
+            }
+            const reply = extractChatResponse(data) || String(raw || '').trim();
+            const summary = reply || 'Message accepted by gateway.';
+
+            globalChatStatus.textContent = `Sent via ${path}`;
+            appendLocalLog('openclaw', 'success', summary);
+            globalChatInput.value = '';
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+
+        const reason = lastError && lastError.message ? lastError.message : 'gateway unreachable';
+        globalChatStatus.textContent = `Send failed: ${reason}`;
+        appendLocalLog('openclaw', 'error', `Global chat send failed: ${reason}`);
+      } finally {
+        globalChatSendBtn.disabled = false;
+      }
+    }
+
     function detectPulseTag(message) {
       const text = String(message || '').toLowerCase();
       if (text.includes('new issue') || text.includes('urgent bug') || text.includes('error checking repo')) return 'issue';
@@ -811,13 +1262,13 @@
 
     function renderGithubPulse() {
       const watcherLogs = (state.logs || [])
-        .filter((entry) => entry.agent === 'github-watcher')
+        .filter((entry) => entry.agent === 'github-agent' || entry.agent === 'github-watcher')
         .slice()
         .reverse()
         .slice(0, 10);
 
       if (!watcherLogs.length) {
-        githubPulse.innerHTML = '<li class="muted">No github-watcher events yet.</li>';
+        githubPulse.innerHTML = '<li class="muted">No github-agent events yet.</li>';
         return;
       }
 
@@ -1029,7 +1480,7 @@
     }
 
     async function checkIntegrationHealth() {
-      const target = targetAgent.value && targetAgent.value !== 'all' ? targetAgent.value : 'travel-concierge';
+      const target = targetAgent.value && targetAgent.value !== 'all' ? targetAgent.value : 'travel-agent';
       const base = agentCommandEndpoints[target];
       if (!base) {
         const agent = (state.agents || []).find((item) => item.name === target);
@@ -1065,15 +1516,161 @@
       renderLogs();
     });
 
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function isDesktopLayout() {
+      return window.matchMedia('(min-width: 1281px)').matches;
+    }
+
+    function applyLayoutSizeVars() {
+      document.documentElement.style.setProperty('--left-col-width', `${layoutSize.leftCol}px`);
+      document.documentElement.style.setProperty('--right-col-width', `${layoutSize.rightCol}px`);
+      document.documentElement.style.setProperty('--left-top-height', `${layoutSize.leftTop}px`);
+    }
+
+    function saveLayoutSizes() {
+      try {
+        localStorage.setItem(layoutStorageKey, JSON.stringify(layoutSize));
+      } catch (_err) {
+      }
+    }
+
+    function loadLayoutSizes() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(layoutStorageKey) || '{}');
+        if (Number.isFinite(saved.leftCol)) layoutSize.leftCol = clamp(saved.leftCol, 220, 520);
+        if (Number.isFinite(saved.rightCol)) layoutSize.rightCol = clamp(saved.rightCol, 280, 520);
+        if (Number.isFinite(saved.leftTop)) layoutSize.leftTop = clamp(saved.leftTop, 130, 480);
+      } catch (_err) {
+      }
+      applyLayoutSizeVars();
+    }
+
+    function bindPointerDrag(resizer, handlers) {
+      if (!resizer) return;
+      resizer.addEventListener('pointerdown', (event) => {
+        if (!isDesktopLayout()) return;
+        event.preventDefault();
+        resizer.classList.add('active');
+        document.body.classList.add('is-resizing');
+        resizer.setPointerCapture(event.pointerId);
+        if (handlers.start) handlers.start(event);
+
+        const onMove = (moveEvent) => {
+          if (handlers.move) handlers.move(moveEvent);
+        };
+
+        const onUp = () => {
+          resizer.classList.remove('active');
+          document.body.classList.remove('is-resizing');
+          resizer.removeEventListener('pointermove', onMove);
+          resizer.removeEventListener('pointerup', onUp);
+          resizer.removeEventListener('pointercancel', onUp);
+          if (handlers.end) handlers.end();
+        };
+
+        resizer.addEventListener('pointermove', onMove);
+        resizer.addEventListener('pointerup', onUp);
+        resizer.addEventListener('pointercancel', onUp);
+      });
+    }
+
+    function setupResizableLayout() {
+      loadLayoutSizes();
+
+      bindPointerDrag(resizerLeftCol, {
+        start(event) {
+          this.startX = event.clientX;
+          this.startLeft = layoutSize.leftCol;
+        },
+        move(event) {
+          const layoutWidth = layoutEl.getBoundingClientRect().width;
+          const reserved = 20 + layoutSize.rightCol;
+          const minLeft = 220;
+          const maxLeft = Math.max(minLeft, layoutWidth - reserved - 420);
+          const next = clamp(this.startLeft + (event.clientX - this.startX), minLeft, maxLeft);
+          layoutSize.leftCol = next;
+          applyLayoutSizeVars();
+        },
+        end() {
+          saveLayoutSizes();
+        }
+      });
+
+      bindPointerDrag(resizerRightCol, {
+        start(event) {
+          this.startX = event.clientX;
+          this.startRight = layoutSize.rightCol;
+        },
+        move(event) {
+          const layoutWidth = layoutEl.getBoundingClientRect().width;
+          const reserved = 20 + layoutSize.leftCol;
+          const minRight = 280;
+          const maxRight = Math.max(minRight, layoutWidth - reserved - 420);
+          const next = clamp(this.startRight - (event.clientX - this.startX), minRight, maxRight);
+          layoutSize.rightCol = next;
+          applyLayoutSizeVars();
+        },
+        end() {
+          saveLayoutSizes();
+        }
+      });
+
+      bindPointerDrag(resizerLeftStack, {
+        start(event) {
+          this.startY = event.clientY;
+          this.startTop = layoutSize.leftTop;
+        },
+        move(event) {
+          const stackHeight = leftStackEl.getBoundingClientRect().height;
+          const minTop = 130;
+          const maxTop = Math.max(minTop, stackHeight - 10 - 210);
+          const next = clamp(this.startTop + (event.clientY - this.startY), minTop, maxTop);
+          layoutSize.leftTop = next;
+          applyLayoutSizeVars();
+        },
+        end() {
+          saveLayoutSizes();
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        applyLayoutSizeVars();
+      });
+    }
+
     refreshNowBtn.addEventListener('click', loadLogs);
     autoRefreshBtn.addEventListener('click', () => setAutoRefresh(!autoRefreshEnabled));
+    globalChatSendBtn.addEventListener('click', sendGlobalChat);
     runPromptBtn.addEventListener('click', dispatchPrompt);
     checkHealthBtn.addEventListener('click', checkIntegrationHealth);
+    repoSelect.addEventListener('change', applyRepoFromDropdown);
+    repoSwitchBtn.addEventListener('click', applyRepoFromInput);
+    repoInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyRepoFromInput();
+      }
+    });
+    globalChatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendGlobalChat();
+      }
+    });
     promptInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) dispatchPrompt();
     });
 
     buildFilters();
+    setupResizableLayout();
+    loadRepoSelector();
+    loadOpenClawRuntimeConfig().then(() => {
+      const tokenText = openclawRuntime.token ? 'token loaded' : 'token not set';
+      globalChatStatus.textContent = `Global chat ready (${tokenText}).`;
+    });
     setAutoRefresh(true);
     loadLogs();
     setInterval(tickUptime, 1000);

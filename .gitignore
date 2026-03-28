@@ -6,3 +6,4 @@ dashboard/travel-response.json
 .env
 travel-state.json
 watcher-state.json
+config/openclaw-device-identity.json

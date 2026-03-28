@@ -5,6 +5,15 @@ const net = require('net');
 
 const LOGS_FILE = path.join(__dirname, 'dashboard', 'logs.json');
 const MAX_LOGS = 200;
+const AGENT_NAME_ALIASES = {
+  'github-watcher': 'github-agent',
+  'travel-concierge': 'travel-agent'
+};
+const CORE_AGENT_NAMES = ['github-agent', 'researcher-agent', 'travel-agent', 'orchestrator'];
+
+function canonicalAgentName(name) {
+  return AGENT_NAME_ALIASES[name] || name;
+}
 
 function ensureLogsFile() {
   const dashboardDir = path.dirname(LOGS_FILE);
@@ -27,6 +36,73 @@ function readLogsData() {
   }
 }
 
+function normalizeAgentRegistryData(data) {
+  const mergedAgents = new Map();
+
+  for (const rawAgent of data.agents) {
+    if (!rawAgent || typeof rawAgent !== 'object') continue;
+    const name = canonicalAgentName(String(rawAgent.name || ''));
+    if (!name) continue;
+
+    const existing = mergedAgents.get(name);
+    if (!existing) {
+      mergedAgents.set(name, {
+        name,
+        status: rawAgent.status || 'running',
+        startedAt: rawAgent.startedAt || new Date().toISOString(),
+        lastSeen: rawAgent.lastSeen || new Date().toISOString()
+      });
+      continue;
+    }
+
+    const existingStarted = Date.parse(existing.startedAt || '') || Date.now();
+    const nextStarted = Date.parse(rawAgent.startedAt || '') || existingStarted;
+    const existingSeen = Date.parse(existing.lastSeen || '') || 0;
+    const nextSeen = Date.parse(rawAgent.lastSeen || '') || existingSeen;
+
+    existing.startedAt = nextStarted < existingStarted ? (rawAgent.startedAt || existing.startedAt) : existing.startedAt;
+    existing.lastSeen = nextSeen > existingSeen ? (rawAgent.lastSeen || existing.lastSeen) : existing.lastSeen;
+    if (rawAgent.status === 'running') existing.status = 'running';
+  }
+
+  data.agents = Array.from(mergedAgents.values());
+
+  for (const name of CORE_AGENT_NAMES) {
+    if (!data.agents.some((agent) => agent && agent.name === name)) {
+      data.agents.push({
+        name,
+        status: 'stopped',
+        startedAt: new Date().toISOString(),
+        lastSeen: new Date().toISOString()
+      });
+    }
+  }
+
+  data.agents.sort((a, b) => {
+    const ai = CORE_AGENT_NAMES.indexOf(a.name);
+    const bi = CORE_AGENT_NAMES.indexOf(b.name);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  data.logs = data.logs.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    return { ...entry, agent: canonicalAgentName(String(entry.agent || '')) };
+  }).filter((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    return !shouldSuppressDashboardLog(entry.agent, entry.message);
+  });
+
+  return data;
+}
+
+function migrateDashboardAgentNames() {
+  const data = normalizeAgentRegistryData(readLogsData());
+  writeLogsData(data);
+}
+
 function writeLogsData(data) {
   fs.writeFileSync(LOGS_FILE, JSON.stringify(data, null, 2));
 }
@@ -37,6 +113,38 @@ function sanitizeDashboardLog(message) {
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
     .replace(/[^\x20-\x7E]/g, '')
     .replace(/\s+/g, ' ');
+}
+
+function hasIsoPrefix(message) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(String(message || ''));
+}
+
+function looksLikeNoisyTokenStream(message) {
+  const compact = String(message || '').replace(/\s+/g, '');
+  if (compact.length < 120) return false;
+
+  const letters = (compact.match(/[A-Za-z]/g) || []).length;
+  const vowels = (compact.match(/[AEIOUaeiou]/g) || []).length;
+  const symbols = (compact.match(/[_$#@{}\[\]\\|]/g) || []).length;
+  const vowelRatio = letters ? (vowels / letters) : 0;
+
+  return (vowelRatio < 0.18 && compact.length > 140) || symbols > 10;
+}
+
+function shouldSuppressDashboardLog(agentName, message) {
+  if (agentName !== 'orchestrator') return false;
+  const text = String(message || '');
+  const lower = text.toLowerCase();
+
+  if (lower.includes('[ws] handshake timeout') || lower.includes('[ws] closed before connect')) {
+    return true;
+  }
+
+  if (!hasIsoPrefix(text) && looksLikeNoisyTokenStream(text)) {
+    return true;
+  }
+
+  return false;
 }
 
 function detectLevel(message) {
@@ -55,13 +163,14 @@ function detectLevel(message) {
 
 function upsertAgentStatus(agentName, status, nowIso) {
   const data = readLogsData();
-  const existing = data.agents.find((agent) => agent.name === agentName);
+  const normalizedName = canonicalAgentName(agentName);
+  const existing = data.agents.find((agent) => agent.name === normalizedName);
   if (existing) {
     existing.status = status;
     existing.lastSeen = nowIso;
   } else {
     data.agents.push({
-      name: agentName,
+      name: normalizedName,
       status,
       startedAt: nowIso,
       lastSeen: nowIso
@@ -76,12 +185,18 @@ function appendLog(agentName, message) {
 
   const now = new Date().toISOString();
   const data = readLogsData();
-  const agent = data.agents.find((item) => item.name === agentName);
+  const normalizedName = canonicalAgentName(agentName);
+
+  if (shouldSuppressDashboardLog(normalizedName, trimmed)) {
+    return;
+  }
+
+  const agent = data.agents.find((item) => item.name === normalizedName);
   if (agent) {
     agent.lastSeen = now;
   } else {
     data.agents.push({
-      name: agentName,
+      name: normalizedName,
       status: 'running',
       startedAt: now,
       lastSeen: now
@@ -91,7 +206,7 @@ function appendLog(agentName, message) {
   data.logs.push({
     id: `${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`,
     time: now,
-    agent: agentName,
+    agent: normalizedName,
     level: detectLevel(trimmed),
     message: trimmed
   });
@@ -180,15 +295,16 @@ function isLocalPortListening(port, host = '127.0.0.1') {
 
 async function bootstrap() {
   ensureLogsFile();
+  migrateDashboardAgentNames();
   console.log('Starting Autonomous Agent System...\n');
 
   const watcher = startAgent(
-    'github-watcher',
+    'github-agent',
     'node',
     ['agents/github/github-watcher.js'],
     { cwd: __dirname }
   );
-  console.log('GitHub Watcher started (Observe layer)');
+  console.log('GitHub Agent started (Observe layer)');
 
   const researcher = startAgent(
     'researcher-agent',
@@ -204,17 +320,17 @@ async function bootstrap() {
   let travelConcierge = null;
   if (travelAlreadyRunning) {
     const now = new Date().toISOString();
-    upsertAgentStatus('travel-concierge', 'running', now);
-    appendLog('travel-concierge', `travel-concierge already running on 127.0.0.1:${travelPort}; startup skipped`);
-    console.log(`Travel Concierge already running on 127.0.0.1:${travelPort} (Plan layer reused)`);
+    upsertAgentStatus('travel-agent', 'running', now);
+    appendLog('travel-agent', `travel-agent already running on 127.0.0.1:${travelPort}; startup skipped`);
+    console.log(`Travel Agent already running on 127.0.0.1:${travelPort} (Plan layer reused)`);
   } else {
     travelConcierge = startAgent(
-      'travel-concierge',
+      'travel-agent',
       'node',
       ['agents/travel/travel-concierge.js'],
       { cwd: __dirname }
     );
-    console.log('Travel Concierge started (Plan layer)');
+    console.log('Travel Agent started (Plan layer)');
   }
 
   const gatewayPort = 18789;
